@@ -37,6 +37,7 @@ import name.soulayrol.rhaa.sholi.data.model.Checkable;
 import name.soulayrol.rhaa.sholi.data.model.DaoMaster;
 import name.soulayrol.rhaa.sholi.data.model.DaoSession;
 import name.soulayrol.rhaa.sholi.data.model.Item;
+import name.soulayrol.rhaa.sholi.sync.credentials.CredentialMetadataStore;
 
 
 public class Operations {
@@ -57,6 +58,11 @@ public class Operations {
         }
         DaoMaster daoMaster = new DaoMaster(_database);
         return daoMaster.newSession();
+    }
+
+    public static CredentialMetadataStore openWebDavCredentialMetadataStore(Context context) {
+        DaoSession daoSession = openSession(context);
+        return new SqliteCredentialMetadataStore(daoSession, _database);
     }
 
     public static void serialize(Context context, LazyList<Item> items, StringBuilder builder) {

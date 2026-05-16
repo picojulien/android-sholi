@@ -1,3 +1,6 @@
+Version 1.6.0
+  + Sync-capable builds now require Android 6.0/API 23 or newer for secure WebDAV credential storage.
+
 Version 1.5.0
   + Serialized data format is now customizable (fixes #21)
   * Fixed #18 (App crash when deleting item)

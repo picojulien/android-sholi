@@ -1,5 +1,10 @@
-/android-sholi.iml
-/local.properties
-/.gradle
-/.idea
-/.gradle-home
+android-sholi.iml
+local.properties
+.gradle
+.idea
+.gradle-home
+.epure
+.codex
+.settings
+build
+env

@@ -1,4 +1,5 @@
 Version 1.6.0
+  * Sync-capable app branding is now sholi-dav.
   + Added WebDAV synchronization using a canonical JSON sync document and ETag-safe uploads.
   + Added WebDAV settings for URL, username, password or app token, remote file path, and device/user display name.
   + Added manual synchronization from the main menu, with success, failure, and conflict feedback.

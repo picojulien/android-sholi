@@ -1,27 +1,27 @@
-# ShoLi - un sencillo gestor de listas cortas
+# sholi-dav - un sencillo gestor de listas cortas
 
 ## Introducción
 
-**ShoLi** pretende ser una herramienta muy sencilla para editar listas cortas y marcar los elementos de esas mismas listas. Su interfaz limpia y eficiente fue inicialmente inspirada en gran medida por la que una vez tuvo [Trolly](http://code.google.com/p/trolly/).
+**sholi-dav** pretende ser una herramienta muy sencilla para editar listas cortas y marcar los elementos de esas mismas listas. Su interfaz limpia y eficiente fue inicialmente inspirada en gran medida por la que una vez tuvo [Trolly](http://code.google.com/p/trolly/).
 
-Este documento pretende ser el manual de usuario de **ShoLi**. Los usuarios que tienen prisa pueden revisar el capítulo siguiente donde podrán encontrar cómo instalar la aplicación y a continuación pasar al capítulo **Uso**. Otras partes del documento proporcionan información que los desarrolladores pueden encontrar interesante.
+Este documento pretende ser el manual de usuario de **sholi-dav**. Los usuarios que tienen prisa pueden revisar el capítulo siguiente donde podrán encontrar cómo instalar la aplicación y a continuación pasar al capítulo **Uso**. Otras partes del documento proporcionan información que los desarrolladores pueden encontrar interesante.
 
 ## Instalación
 
-**ShoLi** es software libre y le invitamos a compilarlo y distribuirlo a partir de [sus fuentes](https://github.com/dsoulayrol/android-Sholi). Si prefiere las distribuciones binarias, puede descargarlo desde las siguientes tiendas de aplicaciones:
+**sholi-dav** es software libre y le invitamos a compilarlo y distribuirlo a partir de [sus fuentes](https://github.com/dsoulayrol/android-Sholi). Si prefiere las distribuciones binarias, puede descargarlo desde las siguientes tiendas de aplicaciones:
 
  * [F-Droid](https://f-droid.org/repository/browse/?fdid=name.soulayrol.rhaa.sholi). Esto es un repositorio dedicado al software libre en dispositivos **Android**. Las aplicaciones son revisadas para detectar malas prácticas, compiladas y firmadas por [ellos](https://f-droid.org/about/).
  * [Google Play](https://play.google.com/store/apps/details?id=name.soulayrol.rhaa.sholi). El repositorio oficial, ofrecido por **Google**. Por defecto sólo las aplicaciones de este repositorio están autorizadas a instalarse en dispositivos **Android**. Por lo tanto, si usted no entiende a que se refiere la línea anterior, sólo tiene que utilizar este enlace.
 
-Las versiones de **ShoLi** con sincronización requieren Android 6.0/API 23 o superior para guardar los secretos WebDAV con almacenamiento cifrado. Las versiones antiguas de **Android** deben seguir usando la versión anterior sin sincronización. **ShoLi** está diseñada para pequeños dispositivos en modo vertical por lo que puede parecer bastante horrible o ser ineficaz en una tableta siendo esto algo normal.
+Las versiones de **sholi-dav** con sincronización requieren Android 6.0/API 23 o superior para guardar los secretos WebDAV con almacenamiento cifrado. Las versiones antiguas de **Android** deben seguir usando la versión anterior sin sincronización. **sholi-dav** está diseñada para pequeños dispositivos en modo vertical por lo que puede parecer bastante horrible o ser ineficaz en una tableta siendo esto algo normal.
 
 ## Uso
 
 ### Primer contacto
 
-**ShoLi** mantiene un conjunto de elementos, y esos elementos se utilizan para elaborar listas. Un uso típico consiste en, primero, crear o completar el conjunto de artículos de alimentación y ponerlos en la lista (por lo general en casa, cuando usted se da cuenta de que se va a acabar la leche, por ejemplo) y luego abrir la lista y marcar los elementos cuando se introducen en el carrito de la compra. **ShoLi** no está limitado sólo a listas de alimentación, por lo que pueden crearse listas con cualquier otro contenido.
+**sholi-dav** mantiene un conjunto de elementos, y esos elementos se utilizan para elaborar listas. Un uso típico consiste en, primero, crear o completar el conjunto de artículos de alimentación y ponerlos en la lista (por lo general en casa, cuando usted se da cuenta de que se va a acabar la leche, por ejemplo) y luego abrir la lista y marcar los elementos cuando se introducen en el carrito de la compra. **sholi-dav** no está limitado sólo a listas de alimentación, por lo que pueden crearse listas con cualquier otro contenido.
 
-Cuando **ShoLi** se inicia la primera vez aparece la *vista principal*, que es no resulta útil en este momento debido a que tanto su lista como su conjunto de elementos están vacíos. Al hacer clic en el icono de la pluma se pasa a la *vista de edición*. Allí se puede utilizar el campo de entrada en la parte superior de la pantalla para introducir nuevos elementos. Nótese cómo este campo actúa como un filtro en la vista y que no se puede introducir el mismo nombre del artículo dos veces. A continuación toque un elemento para ponerlo en la lista (pasa a ser de color verde) o eliminarlo de la lista (vuelve a ser de color gris).
+Cuando **sholi-dav** se inicia la primera vez aparece la *vista principal*, que es no resulta útil en este momento debido a que tanto su lista como su conjunto de elementos están vacíos. Al hacer clic en el icono de la pluma se pasa a la *vista de edición*. Allí se puede utilizar el campo de entrada en la parte superior de la pantalla para introducir nuevos elementos. Nótese cómo este campo actúa como un filtro en la vista y que no se puede introducir el mismo nombre del artículo dos veces. A continuación toque un elemento para ponerlo en la lista (pasa a ser de color verde) o eliminarlo de la lista (vuelve a ser de color gris).
 
 Cuando la lista esté completa puede volver a la *vista principal* haciendo clic en el icono de la aplicación o el botón de retroceso de **Android**. Ningún nuevo elemento se puede introducir ahora pero usted puede marcar los que ha añadido previamente tocándolos. En caso de error se restauran con otro toque.
 
@@ -32,11 +32,11 @@ La *vista principal* ofrece algunas acciones que pueden ser útiles para acelera
  * *Marcar todos*, para marcar todos los elementos de la lista.
  * *Desmarcar todo*, para desmarcar todos los elementos de la lista.
  * *Eliminar los elementos marcados*, para eliminar todos los elementos que se encuentran marcados de la lista. Los artículos están todavía disponibles en el conjunto de artículos para elegir en la *vista de edición*.
- * *Eliminar todo*, para vaciar la lista. Una vez más, todos los elementos eliminados siguen almacenados por **ShoLi** y se pueden poner en una lista de nuevo desde la *vista de edición*.
+ * *Eliminar todo*, para vaciar la lista. Una vez más, todos los elementos eliminados siguen almacenados por **sholi-dav** y se pueden poner en una lista de nuevo desde la *vista de edición*.
 
 ### Gestos
 
-**ShoLi** es capaz de reconocer gestos simples en la *vista principal* para hacer la manipulación de la lista más eficiente si se siente cómodo con ellos. La detección de gestos se activa con multi-touch, por lo que son necesarios al menos dos dedos (aunque los toques deberían funcionar también). Actualmente, **ShoLi** capta los movimientos de deslizamiento hacia la izquierda o hacia la derecha, y el doble toque.
+**sholi-dav** es capaz de reconocer gestos simples en la *vista principal* para hacer la manipulación de la lista más eficiente si se siente cómodo con ellos. La detección de gestos se activa con multi-touch, por lo que son necesarios al menos dos dedos (aunque los toques deberían funcionar también). Actualmente, **sholi-dav** capta los movimientos de deslizamiento hacia la izquierda o hacia la derecha, y el doble toque.
 
 Por defecto, el deslizamiento a la izquierda no hace nada, y el deslizamiento a la derecha elimina elementos seleccionados de la lista. Pulsar dos veces siempre abre el menú contextual con las acciones posibles: es un acceso directo para la entrada *Acción* del menú de opciones.
 
@@ -47,7 +47,7 @@ La acción asignada a los deslizamientos se puede configurar en los ajustes (acc
 
 ### Manipulación del conjunto de elementos
 
-**ShoLi** almacena todos los elementos proporcionados por el usuario y no los elimina de forma implícita. En particular, cualquiera que sea la forma en que un elemento se elimina de la lista en la *vista principal*, este está siempre disponible en la *vista de edición* para ser utilizado de nuevo.
+**sholi-dav** almacena todos los elementos proporcionados por el usuario y no los elimina de forma implícita. En particular, cualquiera que sea la forma en que un elemento se elimina de la lista en la *vista principal*, este está siempre disponible en la *vista de edición* para ser utilizado de nuevo.
 
 La (casi) única manera de deshacerse definitivamente de artículos es un toque largo en la *vista de edición*. Esto nos lleva a una interfaz especial que le permite seleccionar uno o más artículos (el que ha hecho clic para abrir este ya está seleccionado), y luego eliminarlos haciendo clic en el icono de la esquina superior derecha.
 
@@ -57,11 +57,11 @@ En realidad, también es posible eliminar todos los elementos a la vez utilizand
 
 #### La actividad de resumen de datos
 
-**ShoLi** no requiere permiso, pero puede depender de otro software instalado en el teléfono gracias al mecanismo de [intents](http://developer.android.com/training/basics/intents/index.html) de **Android**.
+**sholi-dav** no requiere permiso, pero puede depender de otro software instalado en el teléfono gracias al mecanismo de [intents](http://developer.android.com/training/basics/intents/index.html) de **Android**.
 
 La *actividad de resumen de datos* (accesible desde el menú de opciones) proporciona una forma explícita para vaciar toda la base de datos o exportar su contenido. Para lograr esta última opción, se utiliza el intent *SEND*, que es comúnmente soportada por aplicaciones de mensajería (e-mail o SMS), algunos editores de texto y otros. Al hacer clic en el botón *Exportar* se le presentará una lista de aplicaciones capaces de manejar la lista de elementos. Al elegir uno es posible que tenga sus artículos exportados en un archivo en la tarjeta SD o listos para ser enviados por correo electrónico.
 
-Esta actividad también es capaz de recibir un intent *SEND* y por lo tanto importar un conjunto de elementos previamente guardado. Para ello debe utilizar una aplicación capaz de cargar la lista de un archivo, un correo o cualquier otro y enviarlo a **ShoLi**. Dependiendo de la política de importación seleccionada en la configuración el estado de los elementos que ya estaban presentes en la base de datos se deja intacto (los elementos son reportados como *ignorados*) o se actualiza.
+Esta actividad también es capaz de recibir un intent *SEND* y por lo tanto importar un conjunto de elementos previamente guardado. Para ello debe utilizar una aplicación capaz de cargar la lista de un archivo, un correo o cualquier otro y enviarlo a **sholi-dav**. Dependiendo de la política de importación seleccionada en la configuración el estado de los elementos que ya estaban presentes en la base de datos se deja intacto (los elementos son reportados como *ignorados*) o se actualiza.
 
 A modo de ejemplo, el editor de texto **920** o el cliente de correo **K-9** se sabe que funciona en ambos casos.
 
@@ -77,11 +77,11 @@ Cuando se importan datos sólo las líneas con este formato son analizados, por 
 
 ### Sincronización WebDAV
 
-**ShoLi** puede sincronizar la lista mediante un servidor WebDAV. La sincronización es manual: use la entrada *Sync* del menú principal. En los ajustes se configuran la URL WebDAV, el usuario, la contraseña o token específico de la aplicación, la ruta remota del archivo JSON, y el nombre visible del dispositivo o usuario.
+**sholi-dav** puede sincronizar la lista mediante un servidor WebDAV. La sincronización es manual: use la entrada *Sync* del menú principal. En los ajustes se configuran la URL WebDAV, el usuario, la contraseña o token específico de la aplicación, la ruta remota del archivo JSON, y el nombre visible del dispositivo o usuario.
 
-La contraseña o token se guarda cifrada mediante el almacenamiento seguro de Android; no hay alternativa en texto plano y se recomienda usar un token específico de la aplicación. La acción *Probar conexión* valida el servidor, las credenciales, la ruta remota y los permisos sin cambiar la lista. Si la URL usa HTTP no HTTPS, **ShoLi** muestra una advertencia antes de continuar.
+La contraseña o token se guarda cifrada mediante el almacenamiento seguro de Android; no hay alternativa en texto plano y se recomienda usar un token específico de la aplicación. La acción *Probar conexión* valida el servidor, las credenciales, la ruta remota y los permisos sin cambiar la lista. Si la URL usa HTTP no HTTPS, **sholi-dav** muestra una advertencia antes de continuar.
 
-Una sincronización correcta puede crear o actualizar el documento remoto, descargar cambios remotos o indicar que no hay cambios. Un error muestra un estado general de configuración, autenticación, red, servidor o documento remoto inválido. Si hay conflicto, **ShoLi** muestra los valores local y remoto, campos cambiados, marcas de tiempo, estado, borrado y modificador; el usuario elige la versión local o remota. Con ETag y escrituras condicionales, **ShoLi** evita sobrescrituras ciegas; si no puede comprobar el estado remoto de forma segura, se detiene en lugar de reemplazar datos sin elección del usuario.
+Una sincronización correcta puede crear o actualizar el documento remoto, descargar cambios remotos o indicar que no hay cambios. Un error muestra un estado general de configuración, autenticación, red, servidor o documento remoto inválido. Si hay conflicto, **sholi-dav** muestra los valores local y remoto, campos cambiados, marcas de tiempo, estado, borrado y modificador; el usuario elige la versión local o remota. Con ETag y escrituras condicionales, **sholi-dav** evita sobrescrituras ciegas; si no puede comprobar el estado remoto de forma segura, se detiene en lugar de reemplazar datos sin elección del usuario.
 
 ## Licencia
 

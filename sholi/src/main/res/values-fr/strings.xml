@@ -19,7 +19,7 @@
 -->
 <resources>
 
-    <string name="app_name">ShoLi</string>
+    <string name="app_name">sholi-dav</string>
 
     <!-- Menu options -->
     <string name="action_erase">Effacer</string>
@@ -40,7 +40,7 @@
     <string name="dialog_about_description">Un gestionnaire simple de listes</string>
     <string name="dialog_about_license">Ce programme vient SANS AUCUNE GARANTIE. C\'est un logiciel libre et vous êtes invité à le redistribuer suivant certaines conditions.\nVoyez http://www.gnu.org/licenses/gpl-3.0.html</string>
     <string name="dialog_about_icon">Le logo est dérivé de <tt>List-Icon.svg</tt>, disponible sous une license libre sur <i>Wikimedia Commons</i>.</string>
-    <string name="dialog_about_title">À propos de ShoLi</string>
+    <string name="dialog_about_title">À propos de sholi-dav</string>
     <string name="dialog_erase_all_message">Cette opération est irréversible. Continuer ?</string>
     <string name="dialog_erase_all_title">Tout effacer</string>
     <string name="dialog_checking_confirm_remove_checked">Retirer les articles cochés ?</string>
@@ -90,7 +90,7 @@
     <string name="fragment_data_import_conclusion">Import terminé.</string>
     <string name="fragment_data_export_text">La base de données peut être exportée par courriel, SMS, ou toute application qui accepte de recevoir du texte.</string>
     <string name="fragment_data_export_button">Exporter</string>
-    <string name="fragment_data_export_subject">Base de données Sholi</string>
+    <string name="fragment_data_export_subject">Base de données sholi-dav</string>
     <string name="fragment_data_erase_text">Effacer la totalité de la base de données. Cette opération n\'est pas réversible.</string>
     <string name="fragment_data_erase_button">Tout effacer</string>
 

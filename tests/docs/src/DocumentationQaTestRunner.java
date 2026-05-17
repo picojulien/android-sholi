@@ -20,16 +20,19 @@ public final class DocumentationQaTestRunner {
     private void run() throws IOException {
         expect("CHANGES", "release notes describe WebDAV sync release",
                 "version 1.6.0",
+                "sholi-dav",
                 "webdav synchronization",
                 "android 6.0/api 23",
                 "encrypted",
                 "conflict");
 
         expect("README.md", "README compatibility and features mention sync-capable support",
+                "sholi-dav",
                 "webdav synchronization",
                 "android 6.0/api 23");
 
         expect("doc/manual.md", "English manual documents WebDAV setup and sync behavior",
+                "sholi-dav",
                 "webdav synchronization",
                 "android 6.0/api 23",
                 "webdav url",
@@ -57,6 +60,7 @@ public final class DocumentationQaTestRunner {
                 "blind overwrites");
 
         expect("doc/manual_es.md", "Spanish manual includes concise WebDAV sync update",
+                "sholi-dav",
                 "sincronización webdav",
                 "android 6.0/api 23",
                 "url webdav",
@@ -69,6 +73,21 @@ public final class DocumentationQaTestRunner {
                 "no https",
                 "conflicto",
                 "etag");
+
+        expectCaseSensitive("sholi/src/main/res/values/strings.xml", "English app branding resources",
+                "<string name=\"app_name\">sholi-dav</string>",
+                "<string name=\"dialog_about_title\">About sholi-dav</string>",
+                "<string name=\"fragment_data_export_subject\">sholi-dav Database Content</string>");
+        expectCaseSensitive("sholi/src/main/res/values-fr/strings.xml", "French app branding resources",
+                "<string name=\"app_name\">sholi-dav</string>",
+                "<string name=\"dialog_about_title\">À propos de sholi-dav</string>",
+                "<string name=\"fragment_data_export_subject\">Base de données sholi-dav</string>");
+        expectCaseSensitive("sholi/src/main/res/values-es/strings.xml", "Spanish app branding resources",
+                "<string name=\"app_name\">sholi-dav</string>",
+                "<string name=\"dialog_about_title\">Acerca de sholi-dav</string>",
+                "<string name=\"fragment_data_export_subject\">Contenido de la base de datos de sholi-dav</string>");
+        expectCaseSensitive("sholi/src/main/res/values/preferences_values.xml", "default WebDAV display name branding",
+                "<string name=\"settings_webdav_display_name_default\" translatable=\"false\">sholi-dav device</string>");
 
         if (!failures.isEmpty()) {
             for (String failure: failures) {
@@ -89,8 +108,22 @@ public final class DocumentationQaTestRunner {
         }
     }
 
+    private void expectCaseSensitive(String file, String description, String... requiredSnippets)
+            throws IOException {
+        String text = read(file);
+        for (String snippet: requiredSnippets) {
+            if (!text.contains(snippet)) {
+                failures.add(file + " missing '" + snippet + "' for " + description);
+            }
+        }
+    }
+
     private String readLowercase(String file) throws IOException {
+        return read(file).toLowerCase(Locale.US);
+    }
+
+    private String read(String file) throws IOException {
         byte[] bytes = Files.readAllBytes(Paths.get(file));
-        return new String(bytes, StandardCharsets.UTF_8).toLowerCase(Locale.US);
+        return new String(bytes, StandardCharsets.UTF_8);
     }
 }

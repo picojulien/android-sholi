@@ -7,6 +7,7 @@ import name.soulayrol.rhaa.sholi.data.model.Item;
 import name.soulayrol.rhaa.sholi.data.model.ItemDao;
 import name.soulayrol.rhaa.sholi.sync.document.SyncDocument;
 import name.soulayrol.rhaa.sholi.sync.document.SyncDocumentItemAdapter;
+import name.soulayrol.rhaa.sholi.sync.document.SyncDocumentJson;
 import name.soulayrol.rhaa.sholi.sync.webdav.LocalSyncDocumentStore;
 
 public final class SqliteLocalSyncDocumentStore implements LocalSyncDocumentStore {
@@ -22,18 +23,67 @@ public final class SqliteLocalSyncDocumentStore implements LocalSyncDocumentStor
 
     @Override
     public SyncDocument loadCurrentDocument() {
+        return loadCurrentDocumentInOrder();
+    }
+
+    @Override
+    public boolean isCurrentDocument(final SyncDocument expectedDocument) {
+        if (expectedDocument == null) {
+            throw new IllegalArgumentException("expectedDocument must not be null");
+        }
+        final boolean[] current = new boolean[] { false };
+        daoSession.runInTx(new Runnable() {
+            @Override
+            public void run() {
+                current[0] = sameDocument(loadCurrentDocumentInOrder(), expectedDocument);
+            }
+        });
+        return current[0];
+    }
+
+    @Override
+    public void applyDocument(SyncDocument document) {
+        applyDocumentWithStoreTransaction(document, true);
+    }
+
+    @Override
+    public boolean applyDocumentIfCurrent(final SyncDocument expectedDocument, final SyncDocument document) {
+        if (expectedDocument == null) {
+            throw new IllegalArgumentException("expectedDocument must not be null");
+        }
+        if (document == null) {
+            throw new IllegalArgumentException("document must not be null");
+        }
+        final boolean[] applied = new boolean[] { false };
+        daoSession.runInTx(new Runnable() {
+            @Override
+            public void run() {
+                if (!sameDocument(loadCurrentDocumentInOrder(), expectedDocument)) {
+                    return;
+                }
+                applyDocumentWithStoreTransaction(document, false);
+                applied[0] = true;
+            }
+        });
+        return applied[0];
+    }
+
+    private SyncDocument loadCurrentDocumentInOrder() {
         List<Item> items = daoSession.getItemDao().queryBuilder()
                 .orderAsc(ItemDao.Properties.SyncId)
                 .list();
         return SyncDocumentItemAdapter.toDocument(items);
     }
 
-    @Override
-    public void applyDocument(SyncDocument document) {
+    private void applyDocumentWithStoreTransaction(SyncDocument document, final boolean openTransaction) {
         SyncDocumentItemAdapter.applyBySyncId(document, new SyncDocumentItemAdapter.SyncItemStore<Item>() {
             @Override
             public void runInTransaction(Runnable mutation) {
-                daoSession.runInTx(mutation);
+                if (openTransaction) {
+                    daoSession.runInTx(mutation);
+                } else {
+                    mutation.run();
+                }
             }
 
             @Override
@@ -56,5 +106,9 @@ public final class SqliteLocalSyncDocumentStore implements LocalSyncDocumentStor
                 daoSession.getItemDao().update(item);
             }
         });
+    }
+
+    private static boolean sameDocument(SyncDocument left, SyncDocument right) {
+        return SyncDocumentJson.serialize(left).equals(SyncDocumentJson.serialize(right));
     }
 }

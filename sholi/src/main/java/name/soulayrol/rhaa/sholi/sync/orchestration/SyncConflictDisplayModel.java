@@ -68,6 +68,14 @@ public final class SyncConflictDisplayModel {
         return status;
     }
 
+    public boolean canChooseLocal() {
+        return local.isPresent();
+    }
+
+    public boolean canChooseRemote() {
+        return remote.isPresent();
+    }
+
     public String toDisplayText() {
         StringBuilder builder = new StringBuilder();
         builder.append("Sync ID: ").append(syncId).append('\n');

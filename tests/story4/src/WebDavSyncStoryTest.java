@@ -525,9 +525,23 @@ public final class WebDavSyncStoryTest {
         }
 
         @Override
+        public boolean isCurrentDocument(SyncDocument expectedDocument) {
+            return json(currentDocument).equals(json(expectedDocument));
+        }
+
+        @Override
         public void applyDocument(SyncDocument document) {
             appliedDocuments.add(document);
             currentDocument = document;
+        }
+
+        @Override
+        public boolean applyDocumentIfCurrent(SyncDocument expectedDocument, SyncDocument document) {
+            if (!isCurrentDocument(expectedDocument)) {
+                return false;
+            }
+            applyDocument(document);
+            return true;
         }
     }
 

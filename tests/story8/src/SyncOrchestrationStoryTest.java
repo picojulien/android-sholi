@@ -39,10 +39,14 @@ public final class SyncOrchestrationStoryTest {
 
     public static void run() throws Exception {
         verifySuccessfulNonConflictingSyncAppliesAndRecordsAfterUpload();
+        verifyConcurrentLocalEditBeforeMergedUploadPreservesLocalDataAndMetadata();
+        verifyConcurrentLocalEditBeforeMergedApplyPreservesLocalDataAndMetadata();
         verifyUploadFailurePreservesLocalDataAndMetadata();
         verifyUnresolvedConflictsPersistAndBlockFurtherUploads();
         verifyConflictDisplayModelShowsRequiredCompleteComparisonFields();
+        verifyDisplayModelAndDialogDoNotOfferMissingSideChoices();
         verifyChoosingLocalOrRemoteResolvesCompleteItemVersion();
+        verifyMissingSideResolutionIsRejectedAndConflictStaysUnresolved();
         verifyRemainingUnresolvedConflictBlocksResumeUpload();
         verifyAllResolvedConflictsProduceAndUploadResolvedDocument();
         verifyUnsafeResolvedConflictMarkerRequiresConfirmationWithoutUpload();
@@ -77,6 +81,86 @@ public final class SyncOrchestrationStoryTest {
         assertEquals(0, metadata.loadConflicts().size(), "successful sync clears conflicts");
         assertDoesNotContain(SECRET, result.getMessage(), "sync success message");
         assertDoesNotContain(SECRET, transport.request(2).toString(), "safe upload request string");
+    }
+
+    private static void verifyConcurrentLocalEditBeforeMergedUploadPreservesLocalDataAndMetadata() {
+        SyncItem baseMilk = item("sync-milk", "Milk", 1, false, 10L, "base-device");
+        SyncItem baseBread = item("sync-bread", "Bread", 1, false, 11L, "base-device");
+        SyncItem localMilk = item("sync-milk", "Oat milk", 1, false, 20L, "phone");
+        SyncItem remoteBread = item("sync-bread", "Bread", 2, false, 30L, "tablet");
+        SyncItem concurrentMilk = item("sync-milk", "Almond milk", 1, false, 40L, "phone");
+        SyncDocument baseline = document(baseMilk, baseBread);
+        SyncDocument local = document(localMilk, baseBread);
+        SyncDocument remote = document(baseMilk, remoteBread);
+        final SyncDocument concurrentLocal = document(concurrentMilk, baseBread);
+        final RecordingLocalStore localStore = new RecordingLocalStore(local);
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(200, "\"v2\"", null);
+        transport.respondAndThen(200, "\"v2\"", json(remote), new Runnable() {
+            @Override
+            public void run() {
+                localStore.currentDocument = concurrentLocal;
+            }
+        });
+        transport.respond(204, "\"v3\"", null);
+        RecordingMetadataStore metadata = new RecordingMetadataStore(baseline, "\"v1\"");
+
+        WebDavSyncResult result = controller(transport, localStore, metadata).synchronize(1050L);
+
+        assertEquals(WebDavSyncResult.Status.LOCAL_CHANGED, result.getStatus(),
+                "concurrent edit before upload status");
+        assertContains(result.getMessage(), "changed", "concurrent edit message");
+        assertDoesNotContain(SECRET, result.getMessage(), "concurrent edit message");
+        assertEquals(list("HEAD", "GET"), transport.methods(), "concurrent edit before upload request sequence");
+        assertEquals(0, transport.countMethod("PUT"), "concurrent edit before upload blocks stale PUT");
+        assertEquals(0, localStore.appliedDocuments.size(), "concurrent edit before upload skips local apply");
+        assertDocumentEquals(concurrentLocal, localStore.currentDocument,
+                "concurrent edit before upload preserves active local state");
+        assertDocumentEquals(baseline, metadata.loadBaselineDocument(),
+                "concurrent edit before upload preserves baseline");
+        assertEquals("\"v1\"", metadata.loadRemoteVersionMarker(),
+                "concurrent edit before upload preserves marker");
+        assertEquals(0, metadata.loadConflicts().size(), "concurrent edit before upload keeps prior conflicts");
+    }
+
+    private static void verifyConcurrentLocalEditBeforeMergedApplyPreservesLocalDataAndMetadata() {
+        SyncItem baseMilk = item("sync-milk", "Milk", 1, false, 10L, "base-device");
+        SyncItem baseBread = item("sync-bread", "Bread", 1, false, 11L, "base-device");
+        SyncItem localMilk = item("sync-milk", "Oat milk", 1, false, 20L, "phone");
+        SyncItem remoteBread = item("sync-bread", "Bread", 2, false, 30L, "tablet");
+        SyncItem concurrentMilk = item("sync-milk", "Almond milk", 1, false, 40L, "phone");
+        SyncDocument baseline = document(baseMilk, baseBread);
+        SyncDocument local = document(localMilk, baseBread);
+        SyncDocument remote = document(baseMilk, remoteBread);
+        final SyncDocument concurrentLocal = document(concurrentMilk, baseBread);
+        final RecordingLocalStore localStore = new RecordingLocalStore(local);
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(200, "\"v2\"", null);
+        transport.respond(200, "\"v2\"", json(remote));
+        transport.respondAndThen(204, "\"v3\"", null, new Runnable() {
+            @Override
+            public void run() {
+                localStore.currentDocument = concurrentLocal;
+            }
+        });
+        RecordingMetadataStore metadata = new RecordingMetadataStore(baseline, "\"v1\"");
+
+        WebDavSyncResult result = controller(transport, localStore, metadata).synchronize(1075L);
+
+        assertEquals(WebDavSyncResult.Status.LOCAL_CHANGED, result.getStatus(),
+                "concurrent edit before apply status");
+        assertContains(result.getMessage(), "changed", "concurrent edit before apply message");
+        assertDoesNotContain(SECRET, result.getMessage(), "concurrent edit before apply message");
+        assertEquals(list("HEAD", "GET", "PUT"), transport.methods(),
+                "concurrent edit before apply request sequence");
+        assertEquals(0, localStore.appliedDocuments.size(), "concurrent edit before apply skips stale apply");
+        assertDocumentEquals(concurrentLocal, localStore.currentDocument,
+                "concurrent edit before apply preserves active local state");
+        assertDocumentEquals(baseline, metadata.loadBaselineDocument(),
+                "concurrent edit before apply preserves baseline");
+        assertEquals("\"v1\"", metadata.loadRemoteVersionMarker(),
+                "concurrent edit before apply preserves marker");
+        assertEquals(0, metadata.loadConflicts().size(), "concurrent edit before apply keeps prior conflicts");
     }
 
     private static void verifyUploadFailurePreservesLocalDataAndMetadata() {
@@ -154,6 +238,37 @@ public final class SyncOrchestrationStoryTest {
         assertContains(text, "modified_by.name=tablet-user", "display remote modifier");
     }
 
+    private static void verifyDisplayModelAndDialogDoNotOfferMissingSideChoices() throws Exception {
+        SyncConflict missingLocal = conflict(
+                "sync-missing-local",
+                item("sync-missing-local", "Coffee", 1, false, 10L, "base"),
+                null,
+                item("sync-missing-local", "Coffee", 2, false, 30L, "tablet"),
+                "\"v2\"");
+        SyncConflict missingRemote = conflict(
+                "sync-missing-remote",
+                item("sync-missing-remote", "Tea", 1, false, 10L, "base"),
+                item("sync-missing-remote", "Green tea", 1, false, 20L, "phone"),
+                null,
+                "\"v2\"");
+
+        SyncConflictDisplayModel localModel = SyncConflictDisplayModel.from(missingLocal);
+        SyncConflictDisplayModel remoteModel = SyncConflictDisplayModel.from(missingRemote);
+        String conflictDialog = readUtf8(
+                "sholi/src/main/java/name/soulayrol/rhaa/sholi/SyncConflictDialogFragment.java");
+
+        assertEquals(false, localModel.canChooseLocal(), "missing local choice unavailable");
+        assertEquals(true, localModel.canChooseRemote(), "present remote choice available");
+        assertEquals(true, localModel.toDisplayText().contains("Local: missing"),
+                "missing local display text");
+        assertEquals(true, remoteModel.canChooseLocal(), "present local choice available");
+        assertEquals(false, remoteModel.canChooseRemote(), "missing remote choice unavailable");
+        assertEquals(true, remoteModel.toDisplayText().contains("Remote: missing"),
+                "missing remote display text");
+        assertContains(conflictDialog, "canChooseLocal()", "conflict dialog local availability gate");
+        assertContains(conflictDialog, "canChooseRemote()", "conflict dialog remote availability gate");
+    }
+
     private static void verifyChoosingLocalOrRemoteResolvesCompleteItemVersion() {
         SyncConflict conflict = conflict(
                 "sync-choice",
@@ -183,6 +298,69 @@ public final class SyncOrchestrationStoryTest {
                 "remote choice upload readiness");
         assertItemEquals(conflict.getRemoteItem(), byId(remotePlan.getDocument(), "sync-choice"),
                 "remote choice complete resolved item");
+    }
+
+    private static void verifyMissingSideResolutionIsRejectedAndConflictStaysUnresolved() {
+        SyncConflict missingLocal = conflict(
+                "sync-missing-local-choice",
+                item("sync-missing-local-choice", "Coffee", 1, false, 10L, "base"),
+                null,
+                item("sync-missing-local-choice", "Coffee", 2, false, 30L, "tablet"),
+                "\"v2\"");
+        RecordingLocalStore localStore = new RecordingLocalStore(document());
+        RecordingMetadataStore metadata = new RecordingMetadataStore(document(missingLocal.getBaselineItem()), "\"v1\"");
+        metadata.replaceConflicts(Collections.singletonList(missingLocal));
+        RecordingConflictUploader uploader = new RecordingConflictUploader("\"v3\"");
+        ResolvedConflictSyncService service = new ResolvedConflictSyncService(localStore, metadata, uploader);
+
+        assertMissingSideRejected(service, "sync-missing-local-choice", ConflictChoice.LOCAL,
+                "missing local side rejection");
+        assertEquals(1, metadata.loadConflicts().size(), "missing local conflict remains recorded");
+        assertEquals(SyncConflict.STATUS_UNRESOLVED, metadata.loadConflicts().get(0).getStatus(),
+                "missing local conflict remains unresolved");
+        assertEquals(ResolvedConflictSyncService.UploadPlan.Status.BLOCKED_UNRESOLVED,
+                service.prepareUpload().getStatus(), "missing local rejected upload blocked");
+        assertEquals(WebDavSyncResult.Status.CONFLICTS, service.resumeResolvedConflicts().getStatus(),
+                "missing local rejected resume blocked");
+        assertEquals(0, uploader.uploads.size(), "missing local rejected no upload");
+
+        metadata.replaceConflicts(Collections.singletonList(
+                missingLocal.withStatus(SyncConflict.STATUS_RESOLVED_LOCAL)));
+        ResolvedConflictSyncService.UploadPlan repairedPlan = service.prepareUpload();
+        assertEquals(ResolvedConflictSyncService.UploadPlan.Status.BLOCKED_UNRESOLVED,
+                repairedPlan.getStatus(), "stale missing local resolution is repaired and blocked");
+        assertEquals(SyncConflict.STATUS_UNRESOLVED, metadata.loadConflicts().get(0).getStatus(),
+                "stale missing local resolution becomes unresolved");
+        assertEquals(0, uploader.uploads.size(), "stale missing local resolution no upload");
+
+        service.choose("sync-missing-local-choice", ConflictChoice.REMOTE);
+        ResolvedConflictSyncService.UploadPlan remotePlan = service.prepareUpload();
+        assertEquals(ResolvedConflictSyncService.UploadPlan.Status.READY, remotePlan.getStatus(),
+                "present remote side can resolve missing local conflict");
+        assertItemEquals(missingLocal.getRemoteItem(), byId(remotePlan.getDocument(), "sync-missing-local-choice"),
+                "present remote side selected item");
+
+        SyncConflict missingRemote = conflict(
+                "sync-missing-remote-choice",
+                item("sync-missing-remote-choice", "Tea", 1, false, 10L, "base"),
+                item("sync-missing-remote-choice", "Green tea", 1, false, 20L, "phone"),
+                null,
+                "\"v2\"");
+        localStore = new RecordingLocalStore(document(missingRemote.getLocalItem()));
+        metadata = new RecordingMetadataStore(document(missingRemote.getBaselineItem()), "\"v1\"");
+        metadata.replaceConflicts(Collections.singletonList(missingRemote));
+        service = new ResolvedConflictSyncService(localStore, metadata, uploader);
+
+        assertMissingSideRejected(service, "sync-missing-remote-choice", ConflictChoice.REMOTE,
+                "missing remote side rejection");
+        assertEquals(SyncConflict.STATUS_UNRESOLVED, metadata.loadConflicts().get(0).getStatus(),
+                "missing remote conflict remains unresolved");
+        service.choose("sync-missing-remote-choice", ConflictChoice.LOCAL);
+        ResolvedConflictSyncService.UploadPlan localPlan = service.prepareUpload();
+        assertEquals(ResolvedConflictSyncService.UploadPlan.Status.READY, localPlan.getStatus(),
+                "present local side can resolve missing remote conflict");
+        assertItemEquals(missingRemote.getLocalItem(), byId(localPlan.getDocument(), "sync-missing-remote-choice"),
+                "present local side selected item");
     }
 
     private static void verifyRemainingUnresolvedConflictBlocksResumeUpload() {
@@ -426,6 +604,21 @@ public final class SyncOrchestrationStoryTest {
         }
     }
 
+    private static void assertMissingSideRejected(
+            ResolvedConflictSyncService service,
+            String syncId,
+            ConflictChoice choice,
+            String label) {
+        try {
+            service.choose(syncId, choice);
+        } catch (IllegalStateException e) {
+            assertContains(e.getMessage(), "missing", label + " message");
+            assertDoesNotContain(SECRET, e.getMessage(), label + " message");
+            return;
+        }
+        throw new AssertionError("Expected " + label + " to reject missing snapshot choice");
+    }
+
     private static void assertEquals(Object expected, Object actual, String label) {
         if (expected == null ? actual != null : !expected.equals(actual)) {
             throw new AssertionError("Unexpected " + label + ": expected=" + expected + " actual=" + actual);
@@ -471,14 +664,18 @@ public final class SyncOrchestrationStoryTest {
 
     private static final class RecordingTransport implements WebDavTransport {
         private final List<WebDavRequest> requests = new ArrayList<WebDavRequest>();
-        private final List<Object> responses = new ArrayList<Object>();
+        private final List<ResponseAction> responses = new ArrayList<ResponseAction>();
 
         void respond(int statusCode, String etag, String body) {
+            respondAndThen(statusCode, etag, body, null);
+        }
+
+        void respondAndThen(int statusCode, String etag, String body, Runnable afterResponse) {
             Map<String, String> headers = new LinkedHashMap<String, String>();
             if (etag != null) {
                 headers.put("ETag", etag);
             }
-            responses.add(new WebDavResponse(statusCode, headers, body));
+            responses.add(new ResponseAction(new WebDavResponse(statusCode, headers, body), afterResponse));
         }
 
         @Override
@@ -487,11 +684,11 @@ public final class SyncOrchestrationStoryTest {
             if (responses.isEmpty()) {
                 throw new AssertionError("No queued WebDAV response for " + request.getMethod());
             }
-            Object response = responses.remove(0);
-            if (response instanceof WebDavTransportException) {
-                throw (WebDavTransportException) response;
+            ResponseAction response = responses.remove(0);
+            if (response.afterResponse != null) {
+                response.afterResponse.run();
             }
-            return (WebDavResponse) response;
+            return response.response;
         }
 
         WebDavRequest request(int index) {
@@ -515,6 +712,16 @@ public final class SyncOrchestrationStoryTest {
             }
             return methods;
         }
+
+        private static final class ResponseAction {
+            private final WebDavResponse response;
+            private final Runnable afterResponse;
+
+            ResponseAction(WebDavResponse response, Runnable afterResponse) {
+                this.response = response;
+                this.afterResponse = afterResponse;
+            }
+        }
     }
 
     private static final class RecordingLocalStore implements LocalSyncDocumentStore {
@@ -531,9 +738,23 @@ public final class SyncOrchestrationStoryTest {
         }
 
         @Override
+        public boolean isCurrentDocument(SyncDocument expectedDocument) {
+            return json(currentDocument).equals(json(expectedDocument));
+        }
+
+        @Override
         public void applyDocument(SyncDocument document) {
             appliedDocuments.add(document);
             currentDocument = document;
+        }
+
+        @Override
+        public boolean applyDocumentIfCurrent(SyncDocument expectedDocument, SyncDocument document) {
+            if (!isCurrentDocument(expectedDocument)) {
+                return false;
+            }
+            applyDocument(document);
+            return true;
         }
     }
 

@@ -6,5 +6,9 @@ public interface LocalSyncDocumentStore {
 
     SyncDocument loadCurrentDocument();
 
+    boolean isCurrentDocument(SyncDocument expectedDocument);
+
     void applyDocument(SyncDocument document);
+
+    boolean applyDocumentIfCurrent(SyncDocument expectedDocument, SyncDocument document);
 }

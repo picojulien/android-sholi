@@ -45,7 +45,7 @@ public final class ConflictResolution {
                 ? conflict.getLocalItem()
                 : conflict.getRemoteItem();
         if (chosen == null) {
-            throw new IllegalStateException("chosen conflict side has no item snapshot");
+            throw new IllegalStateException("Cannot resolve conflict because the selected snapshot is missing");
         }
         return chosen;
     }
@@ -56,6 +56,12 @@ public final class ConflictResolution {
         }
         if (choice == null) {
             throw new IllegalArgumentException("choice must not be null");
+        }
+        if (choice == ConflictChoice.LOCAL && conflict.getLocalItem() == null) {
+            throw new IllegalStateException("Cannot resolve conflict because the selected local snapshot is missing");
+        }
+        if (choice == ConflictChoice.REMOTE && conflict.getRemoteItem() == null) {
+            throw new IllegalStateException("Cannot resolve conflict because the selected remote snapshot is missing");
         }
         if (choice == ConflictChoice.LOCAL) {
             return conflict.withStatus(SyncConflict.STATUS_RESOLVED_LOCAL);

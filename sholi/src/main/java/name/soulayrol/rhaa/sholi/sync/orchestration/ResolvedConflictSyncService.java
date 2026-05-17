@@ -76,6 +76,12 @@ public final class ResolvedConflictSyncService {
             }
         }
 
+        List<SyncConflict> repairedConflicts = markMissingSideResolutionsUnresolved(conflicts);
+        if (repairedConflicts != null) {
+            metadataStore.replaceConflicts(repairedConflicts);
+            return UploadPlan.blocked(repairedConflicts);
+        }
+
         String remoteVersionMarker = sharedRemoteVersionMarker(conflicts);
         if (!WebDavEtag.classify(remoteVersionMarker).isStrong()) {
             return UploadPlan.confirmationRequired(conflicts);
@@ -156,6 +162,31 @@ public final class ResolvedConflictSyncService {
             return ConflictResolution.resolve(conflict, ConflictChoice.REMOTE);
         }
         throw new IllegalStateException("unresolved conflict for sync_id " + conflict.getSyncId());
+    }
+
+    private static List<SyncConflict> markMissingSideResolutionsUnresolved(List<SyncConflict> conflicts) {
+        ArrayList<SyncConflict> updated = null;
+        for (int i = 0; i < conflicts.size(); ++i) {
+            SyncConflict conflict = conflicts.get(i);
+            SyncConflict replacement = conflict;
+            if (SyncConflict.STATUS_RESOLVED_LOCAL.equals(conflict.getStatus())
+                    && conflict.getLocalItem() == null) {
+                replacement = conflict.withStatus(SyncConflict.STATUS_UNRESOLVED);
+            } else if (SyncConflict.STATUS_RESOLVED_REMOTE.equals(conflict.getStatus())
+                    && conflict.getRemoteItem() == null) {
+                replacement = conflict.withStatus(SyncConflict.STATUS_UNRESOLVED);
+            }
+            if (replacement != conflict && updated == null) {
+                updated = new ArrayList<SyncConflict>(conflicts.size());
+                for (int j = 0; j < i; ++j) {
+                    updated.add(conflicts.get(j));
+                }
+            }
+            if (updated != null) {
+                updated.add(replacement);
+            }
+        }
+        return updated;
     }
 
     private static String sharedRemoteVersionMarker(List<SyncConflict> conflicts) {

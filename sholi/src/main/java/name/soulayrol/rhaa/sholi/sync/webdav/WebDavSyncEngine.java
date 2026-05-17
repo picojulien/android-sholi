@@ -82,13 +82,18 @@ public final class WebDavSyncEngine {
             SyncDocument localDocument,
             SyncDocument baselineDocument,
             long conflictTimestamp) {
+        WebDavSyncResult staleLocalResult = validateLocalUnchanged(localDocument);
+        if (staleLocalResult != null) {
+            return staleLocalResult;
+        }
         WebDavPutResult put = client.putIfAbsent(remoteUrl, SyncDocumentJson.serialize(localDocument));
         if (put.getStatus() == WebDavPutResult.Status.SUCCESS) {
-            SyncStateRecorder.recordSuccessfulUpload(
-                    metadataStore,
+            return recordSuccessfulSync(
                     localDocument,
-                    markerFrom(put.getEtag()));
-            return WebDavSyncResult.status(
+                    localDocument,
+                    markerFrom(put.getEtag()),
+                    false,
+                    true,
                     WebDavSyncResult.Status.CREATED_REMOTE,
                     "Created remote sync document");
         }
@@ -107,7 +112,10 @@ public final class WebDavSyncEngine {
         WebDavEtag remoteEtag = metadata.getEtag();
         if (remoteEtag.isStrong() && sameStrongMarker(remoteEtag.getValue(), lastRemoteMarker)) {
             if (sameDocument(localDocument, baselineDocument)) {
-                return WebDavSyncResult.status(WebDavSyncResult.Status.UP_TO_DATE, "No sync changes detected");
+                return statusIfLocalUnchanged(
+                        localDocument,
+                        WebDavSyncResult.Status.UP_TO_DATE,
+                        "No sync changes detected");
             }
             return uploadWithIfMatch(
                     localDocument,
@@ -154,11 +162,12 @@ public final class WebDavSyncEngine {
             boolean retryOnPrecondition) {
         if (baselineDocument != null && sameDocument(snapshot.document, baselineDocument)) {
             if (sameDocument(localDocument, baselineDocument)) {
-                SyncStateRecorder.recordSuccessfulPullOnly(
-                        metadataStore,
+                return recordSuccessfulSync(
+                        localDocument,
                         snapshot.document,
-                        markerFrom(snapshot.etag));
-                return WebDavSyncResult.status(
+                        markerFrom(snapshot.etag),
+                        false,
+                        false,
                         WebDavSyncResult.Status.UP_TO_DATE,
                         "Remote sync document matches baseline");
             }
@@ -179,13 +188,21 @@ public final class WebDavSyncEngine {
                 markerFrom(snapshot.etag),
                 conflictTimestamp);
         if (merge.hasConflicts()) {
+            WebDavSyncResult staleLocalResult = validateLocalUnchanged(localDocument);
+            if (staleLocalResult != null) {
+                return staleLocalResult;
+            }
             SyncStateRecorder.persistConflicts(metadataStore, merge.getConflicts());
             return WebDavSyncResult.conflicts(merge.getConflicts());
         }
 
         SyncDocument mergedDocument = merge.getMergedDocument();
         if (sameDocument(mergedDocument, snapshot.document)) {
-            return recordPullOnly(mergedDocument, markerFrom(snapshot.etag), !sameDocument(localDocument, mergedDocument));
+            return recordPullOnly(
+                    mergedDocument,
+                    markerFrom(snapshot.etag),
+                    !sameDocument(localDocument, mergedDocument),
+                    localDocument);
         }
         return uploadWithIfMatch(
                 mergedDocument,
@@ -204,11 +221,12 @@ public final class WebDavSyncEngine {
             long conflictTimestamp) {
         if (baselineDocument == null) {
             if (sameDocument(localDocument, snapshot.document)) {
-                SyncStateRecorder.recordSuccessfulPullOnly(
-                        metadataStore,
+                return recordSuccessfulSync(
+                        localDocument,
                         snapshot.document,
-                        markerFrom(snapshot.etag));
-                return WebDavSyncResult.status(
+                        markerFrom(snapshot.etag),
+                        false,
+                        false,
                         WebDavSyncResult.Status.UP_TO_DATE,
                         "Remote sync document already matches local document");
             }
@@ -217,11 +235,12 @@ public final class WebDavSyncEngine {
 
         if (sameDocument(snapshot.document, baselineDocument)) {
             if (sameDocument(localDocument, baselineDocument)) {
-                SyncStateRecorder.recordSuccessfulPullOnly(
-                        metadataStore,
+                return recordSuccessfulSync(
+                        localDocument,
                         snapshot.document,
-                        markerFrom(snapshot.etag));
-                return WebDavSyncResult.status(
+                        markerFrom(snapshot.etag),
+                        false,
+                        false,
                         WebDavSyncResult.Status.UP_TO_DATE,
                         "Remote sync document matches baseline");
             }
@@ -235,13 +254,21 @@ public final class WebDavSyncEngine {
                 markerFrom(snapshot.etag),
                 conflictTimestamp);
         if (merge.hasConflicts()) {
+            WebDavSyncResult staleLocalResult = validateLocalUnchanged(localDocument);
+            if (staleLocalResult != null) {
+                return staleLocalResult;
+            }
             SyncStateRecorder.persistConflicts(metadataStore, merge.getConflicts());
             return WebDavSyncResult.conflicts(merge.getConflicts());
         }
 
         SyncDocument mergedDocument = merge.getMergedDocument();
         if (sameDocument(mergedDocument, snapshot.document)) {
-            return recordPullOnly(mergedDocument, markerFrom(snapshot.etag), !sameDocument(localDocument, mergedDocument));
+            return recordPullOnly(
+                    mergedDocument,
+                    markerFrom(snapshot.etag),
+                    !sameDocument(localDocument, mergedDocument),
+                    localDocument);
         }
         return confirmationRequired();
     }
@@ -279,22 +306,21 @@ public final class WebDavSyncEngine {
             SyncDocument localDocument,
             SyncDocument baselineDocument,
             long conflictTimestamp) {
+        WebDavSyncResult staleLocalResult = validateLocalUnchanged(localDocument);
+        if (staleLocalResult != null) {
+            return staleLocalResult;
+        }
         WebDavPutResult put = client.putIfMatch(
                 remoteUrl,
                 SyncDocumentJson.serialize(uploadDocument),
                 safeUploadMarker);
         if (put.getStatus() == WebDavPutResult.Status.SUCCESS) {
-            if (applyUploadedDocument) {
-                WebDavSyncResult applyResult = applyLocalDocument(uploadDocument);
-                if (applyResult != null) {
-                    return applyResult;
-                }
-            }
-            SyncStateRecorder.recordSuccessfulUpload(
-                    metadataStore,
+            return recordSuccessfulSync(
+                    localDocument,
                     uploadDocument,
-                    markerFrom(put.getEtag()));
-            return WebDavSyncResult.status(
+                    markerFrom(put.getEtag()),
+                    applyUploadedDocument,
+                    true,
                     WebDavSyncResult.Status.UPDATED_REMOTE,
                     "Updated remote sync document");
         }
@@ -312,28 +338,83 @@ public final class WebDavSyncEngine {
     private WebDavSyncResult recordPullOnly(
             SyncDocument document,
             String marker,
-            boolean applyDocument) {
-        if (applyDocument) {
-            WebDavSyncResult applyResult = applyLocalDocument(document);
-            if (applyResult != null) {
-                return applyResult;
-            }
-        }
-        SyncStateRecorder.recordSuccessfulPullOnly(metadataStore, document, marker);
-        return WebDavSyncResult.status(
+            boolean applyDocument,
+            SyncDocument expectedLocalDocument) {
+        return recordSuccessfulSync(
+                expectedLocalDocument,
+                document,
+                marker,
+                applyDocument,
+                false,
                 WebDavSyncResult.Status.PULLED_REMOTE,
                 "Pulled remote sync document");
     }
 
-    private WebDavSyncResult applyLocalDocument(SyncDocument document) {
+    private WebDavSyncResult recordSuccessfulSync(
+            SyncDocument expectedLocalDocument,
+            SyncDocument syncedDocument,
+            String marker,
+            boolean applyDocument,
+            boolean upload,
+            WebDavSyncResult.Status successStatus,
+            String successMessage) {
+        WebDavSyncResult localResult = applyDocument
+                ? applyLocalDocumentIfCurrent(expectedLocalDocument, syncedDocument)
+                : validateLocalUnchanged(expectedLocalDocument);
+        if (localResult != null) {
+            return localResult;
+        }
+        if (upload) {
+            SyncStateRecorder.recordSuccessfulUpload(metadataStore, syncedDocument, marker);
+        } else {
+            SyncStateRecorder.recordSuccessfulPullOnly(metadataStore, syncedDocument, marker);
+        }
+        return WebDavSyncResult.status(successStatus, successMessage);
+    }
+
+    private WebDavSyncResult applyLocalDocumentIfCurrent(
+            SyncDocument expectedDocument,
+            SyncDocument document) {
         try {
-            localStore.applyDocument(document);
+            if (!localStore.applyDocumentIfCurrent(expectedDocument, document)) {
+                return localChanged();
+            }
             return null;
         } catch (RuntimeException e) {
             return WebDavSyncResult.status(
                     WebDavSyncResult.Status.LOCAL_APPLY_ERROR,
                     "Local sync document apply failed");
         }
+    }
+
+    private WebDavSyncResult validateLocalUnchanged(SyncDocument expectedDocument) {
+        try {
+            if (!localStore.isCurrentDocument(expectedDocument)) {
+                return localChanged();
+            }
+            return null;
+        } catch (RuntimeException e) {
+            return WebDavSyncResult.status(
+                    WebDavSyncResult.Status.LOCAL_APPLY_ERROR,
+                    "Local sync document validation failed");
+        }
+    }
+
+    private WebDavSyncResult statusIfLocalUnchanged(
+            SyncDocument expectedDocument,
+            WebDavSyncResult.Status status,
+            String message) {
+        WebDavSyncResult staleLocalResult = validateLocalUnchanged(expectedDocument);
+        if (staleLocalResult != null) {
+            return staleLocalResult;
+        }
+        return WebDavSyncResult.status(status, message);
+    }
+
+    private static WebDavSyncResult localChanged() {
+        return WebDavSyncResult.status(
+                WebDavSyncResult.Status.LOCAL_CHANGED,
+                "Local items changed during synchronization; please retry");
     }
 
     private RemoteSnapshot downloadRemote(WebDavMetadataResult metadata) {

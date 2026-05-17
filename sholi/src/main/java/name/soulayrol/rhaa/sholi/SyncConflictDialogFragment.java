@@ -45,22 +45,27 @@ public final class SyncConflictDialogFragment extends DialogFragment {
         }
 
         conflict = conflicts.get(0);
-        String message = SyncConflictDisplayModel.from(conflict).toDisplayText();
-        return new AlertDialog.Builder(activity)
+        SyncConflictDisplayModel model = SyncConflictDisplayModel.from(conflict);
+        String message = model.toDisplayText();
+        AlertDialog.Builder builder = new AlertDialog.Builder(activity)
                 .setTitle(R.string.sync_conflict_dialog_title)
                 .setMessage(message)
-                .setPositiveButton("Use local", new DialogInterface.OnClickListener() {
+                .setNeutralButton(android.R.string.cancel, null);
+        if (model.canChooseLocal()) {
+            builder.setPositiveButton("Use local", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
                         choose(ConflictChoice.LOCAL);
                     }
-                })
-                .setNegativeButton("Use remote", new DialogInterface.OnClickListener() {
+                });
+        }
+        if (model.canChooseRemote()) {
+            builder.setNegativeButton("Use remote", new DialogInterface.OnClickListener() {
                     public void onClick(DialogInterface dialog, int which) {
                         choose(ConflictChoice.REMOTE);
                     }
-                })
-                .setNeutralButton(android.R.string.cancel, null)
-                .create();
+                });
+        }
+        return builder.create();
     }
 
     private void choose(ConflictChoice choice) {
@@ -69,7 +74,12 @@ public final class SyncConflictDialogFragment extends DialogFragment {
             return;
         }
         AndroidWebDavSyncRunner runner = new AndroidWebDavSyncRunner(activity);
-        runner.choose(conflict.getSyncId(), choice);
+        try {
+            runner.choose(conflict.getSyncId(), choice);
+        } catch (IllegalStateException e) {
+            Toast.makeText(activity, e.getMessage(), Toast.LENGTH_LONG).show();
+            return;
+        }
         if (runner.loadUnresolvedConflicts().isEmpty()) {
             Toast.makeText(
                     activity,

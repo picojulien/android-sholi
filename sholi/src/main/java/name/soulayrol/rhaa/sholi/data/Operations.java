@@ -43,6 +43,7 @@ import name.soulayrol.rhaa.sholi.data.model.ItemDao;
 import name.soulayrol.rhaa.sholi.sync.credentials.CredentialMetadataStore;
 import name.soulayrol.rhaa.sholi.sync.items.ItemSyncMetadata;
 import name.soulayrol.rhaa.sholi.sync.items.ItemSyncMetadataMigration;
+import name.soulayrol.rhaa.sholi.sync.merge.SyncMetadataStore;
 
 
 public class Operations {
@@ -70,6 +71,11 @@ public class Operations {
     public static CredentialMetadataStore openWebDavCredentialMetadataStore(Context context) {
         DaoSession daoSession = openSession(context);
         return new SqliteCredentialMetadataStore(daoSession, _database);
+    }
+
+    public static SyncMetadataStore openWebDavSyncMetadataStore(Context context) {
+        DaoSession daoSession = openSession(context);
+        return new SqliteSyncMetadataStore(daoSession, _database);
     }
 
     public static void serialize(Context context, LazyList<Item> items, StringBuilder builder) {

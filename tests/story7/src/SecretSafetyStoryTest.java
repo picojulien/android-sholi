@@ -15,7 +15,9 @@ public final class SecretSafetyStoryTest {
         String secret = "ultra-secret";
         WebDavCredentials credentials = new WebDavCredentials("alice", secret);
         WebDavSyncProfile profile = new WebDavSyncProfile(
-                "https://cloud.example.net/remote.php/dav/files/alice",
+                "https://alice:" + secret
+                        + "@cloud.example.net/remote.php/dav/files/alice?access_token="
+                        + secret + "&display=shopping",
                 "alice",
                 "sholi/sync.json");
 
@@ -30,6 +32,9 @@ public final class SecretSafetyStoryTest {
 
         String errorLine = CredentialSafeLogger.authenticationError(profile, credentials);
         assertDoesNotContain(secret, errorLine, "error message");
+
+        String credentialsText = credentials.toString();
+        assertDoesNotContain(secret, credentialsText, "credentials string");
     }
 
     private static void assertDoesNotContain(String forbidden, String content, String label) {

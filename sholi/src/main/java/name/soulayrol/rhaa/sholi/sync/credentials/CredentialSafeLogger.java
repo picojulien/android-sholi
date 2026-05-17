@@ -6,12 +6,14 @@ public final class CredentialSafeLogger {
     }
 
     public static String syncConfigured(WebDavSyncProfile profile, WebDavCredentials credentials) {
-        return "Sync configured for user '" + profile.getUsername()
-                + "' at '" + profile.getUrl() + "'";
+        String message = "Sync configured for user '" + profile.getUsername()
+                + "' at '" + CredentialSafeText.url(profile.getUrl()) + "'";
+        return CredentialSafeText.redactCredential(message, credentials);
     }
 
     public static String authenticationError(WebDavSyncProfile profile, WebDavCredentials credentials) {
-        return "WebDAV authentication failed for user '"
+        String message = "WebDAV authentication failed for user '"
                 + profile.getUsername() + "'";
+        return CredentialSafeText.redactCredential(message, credentials);
     }
 }

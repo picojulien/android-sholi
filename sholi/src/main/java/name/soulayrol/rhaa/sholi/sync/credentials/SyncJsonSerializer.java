@@ -10,7 +10,7 @@ public final class SyncJsonSerializer {
         builder.append('{');
         builder.append("\"schema_version\":1,");
         builder.append("\"webdav\":{");
-        builder.append("\"url\":\"").append(escape(profile.getUrl())).append("\",");
+        builder.append("\"url\":\"").append(escape(CredentialSafeText.url(profile.getUrl()))).append("\",");
         builder.append("\"username\":\"").append(escape(profile.getUsername())).append("\",");
         builder.append("\"remote_path\":\"").append(escape(profile.getRemotePath())).append("\"");
         builder.append("}}");

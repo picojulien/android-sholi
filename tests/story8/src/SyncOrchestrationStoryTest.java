@@ -49,6 +49,8 @@ public final class SyncOrchestrationStoryTest {
         verifyMissingSideResolutionIsRejectedAndConflictStaysUnresolved();
         verifyRemainingUnresolvedConflictBlocksResumeUpload();
         verifyAllResolvedConflictsProduceAndUploadResolvedDocument();
+        verifyLocalEditAfterConflictCaptureBeforeResumeDoesNotUploadStaleResolution();
+        verifyLocalEditDuringResolvedConflictUploadDoesNotApplyOrRecordStaleResolution();
         verifyUnsafeResolvedConflictMarkerRequiresConfirmationWithoutUpload();
         verifySyncMenuAndConflictUiSources();
     }
@@ -440,6 +442,85 @@ public final class SyncOrchestrationStoryTest {
         assertEquals(0, metadata.loadConflicts().size(), "all resolved clears conflicts");
     }
 
+    private static void verifyLocalEditAfterConflictCaptureBeforeResumeDoesNotUploadStaleResolution() {
+        SyncConflict conflict = conflict(
+                "sync-stale-resume",
+                item("sync-stale-resume", "Apples", 1, false, 10L, "base"),
+                item("sync-stale-resume", "Green apples", 1, false, 20L, "phone"),
+                item("sync-stale-resume", "Red apples", 1, false, 30L, "tablet"),
+                "\"v2\"");
+        SyncDocument baseline = document(conflict.getBaselineItem());
+        SyncDocument capturedLocal = document(conflict.getLocalItem());
+        SyncDocument editedLocal = document(
+                item("sync-stale-resume", "Yellow apples", 1, false, 40L, "phone"));
+        RecordingLocalStore localStore = new RecordingLocalStore(capturedLocal);
+        RecordingMetadataStore metadata = new RecordingMetadataStore(baseline, "\"v1\"");
+        metadata.replaceConflicts(Collections.singletonList(conflict));
+        RecordingConflictUploader uploader = new RecordingConflictUploader("\"v3\"");
+        ResolvedConflictSyncService service = new ResolvedConflictSyncService(localStore, metadata, uploader);
+
+        service.choose("sync-stale-resume", ConflictChoice.LOCAL);
+        localStore.currentDocument = editedLocal;
+        WebDavSyncResult result = service.resumeResolvedConflicts();
+
+        assertEquals(WebDavSyncResult.Status.LOCAL_CHANGED, result.getStatus(),
+                "stale resolved resume status");
+        assertEquals(0, uploader.uploads.size(), "stale resolved resume blocks upload");
+        assertEquals(0, localStore.appliedDocuments.size(), "stale resolved resume skips local apply");
+        assertDocumentEquals(editedLocal, localStore.currentDocument,
+                "stale resolved resume preserves active local edit");
+        assertDocumentEquals(baseline, metadata.loadBaselineDocument(),
+                "stale resolved resume preserves baseline");
+        assertEquals("\"v1\"", metadata.loadRemoteVersionMarker(),
+                "stale resolved resume preserves marker");
+        assertEquals(1, metadata.loadConflicts().size(),
+                "stale resolved resume keeps conflict metadata");
+        assertEquals(SyncConflict.STATUS_RESOLVED_LOCAL, metadata.loadConflicts().get(0).getStatus(),
+                "stale resolved resume keeps resolved choice for safe retry handling");
+    }
+
+    private static void verifyLocalEditDuringResolvedConflictUploadDoesNotApplyOrRecordStaleResolution() {
+        SyncConflict conflict = conflict(
+                "sync-race-resume",
+                item("sync-race-resume", "Tea", 1, false, 10L, "base"),
+                item("sync-race-resume", "Green tea", 1, false, 20L, "phone"),
+                item("sync-race-resume", "Black tea", 1, false, 30L, "tablet"),
+                "\"v2\"");
+        SyncDocument baseline = document(conflict.getBaselineItem());
+        SyncDocument capturedLocal = document(conflict.getLocalItem());
+        final SyncDocument editedLocal = document(
+                item("sync-race-resume", "Mint tea", 1, false, 40L, "phone"));
+        final RecordingLocalStore localStore = new RecordingLocalStore(capturedLocal);
+        RecordingMetadataStore metadata = new RecordingMetadataStore(baseline, "\"v1\"");
+        metadata.replaceConflicts(Collections.singletonList(conflict));
+        RecordingConflictUploader uploader = new RecordingConflictUploader("\"v3\"", new Runnable() {
+            @Override
+            public void run() {
+                localStore.currentDocument = editedLocal;
+            }
+        });
+        ResolvedConflictSyncService service = new ResolvedConflictSyncService(localStore, metadata, uploader);
+
+        service.choose("sync-race-resume", ConflictChoice.REMOTE);
+        WebDavSyncResult result = service.resumeResolvedConflicts();
+
+        assertEquals(WebDavSyncResult.Status.LOCAL_CHANGED, result.getStatus(),
+                "resolved resume concurrent edit status");
+        assertEquals(1, uploader.uploads.size(), "resolved resume upload already happened");
+        assertEquals(0, localStore.appliedDocuments.size(),
+                "resolved resume concurrent edit skips stale local apply");
+        assertDocumentEquals(editedLocal, localStore.currentDocument,
+                "resolved resume concurrent edit preserves active local state");
+        assertDocumentEquals(baseline, metadata.loadBaselineDocument(),
+                "resolved resume concurrent edit preserves baseline");
+        assertEquals("\"v1\"", metadata.loadRemoteVersionMarker(),
+                "resolved resume concurrent edit preserves marker");
+        assertEquals(1, metadata.loadConflicts().size(),
+                "resolved resume concurrent edit keeps conflict metadata");
+        assertEquals(SyncConflict.STATUS_RESOLVED_REMOTE, metadata.loadConflicts().get(0).getStatus(),
+                "resolved resume concurrent edit keeps resolved choice for safe retry handling");
+    }
+
     private static void verifyUnsafeResolvedConflictMarkerRequiresConfirmationWithoutUpload() {
         SyncConflict missingMarker = conflict(
                 "sync-unsafe-a",
@@ -812,19 +893,29 @@ public final class SyncOrchestrationStoryTest {
     private static final class RecordingConflictUploader
             implements ResolvedConflictSyncService.ConflictUploader {
         private final String successMarker;
+        private final Runnable afterUpload;
         private final List<Upload> uploads = new ArrayList<Upload>();
 
         RecordingConflictUploader(String successMarker) {
+            this(successMarker, null);
+        }
+
+        RecordingConflictUploader(String successMarker, Runnable afterUpload) {
             this.successMarker = successMarker;
+            this.afterUpload = afterUpload;
         }
 
         @Override
         public WebDavPutResult uploadResolvedDocument(SyncDocument document, String remoteVersionMarker) {
             uploads.add(new Upload(document, remoteVersionMarker));
+            if (afterUpload != null) {
+                afterUpload.run();
+            }
             return WebDavPutResult.success(
                     name.soulayrol.rhaa.sholi.sync.webdav.WebDavEtag.classify(successMarker),
                     204);
         }
+
     }
 
     private static final class Upload {

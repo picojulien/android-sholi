@@ -4,6 +4,7 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 
+import name.soulayrol.rhaa.sholi.sync.document.ModifiedBy;
 import name.soulayrol.rhaa.sholi.sync.document.SyncDocument;
 import name.soulayrol.rhaa.sholi.sync.document.SyncItem;
 import name.soulayrol.rhaa.sholi.sync.merge.ConflictChoice;
@@ -86,7 +87,14 @@ public final class ResolvedConflictSyncService {
         if (!WebDavEtag.classify(remoteVersionMarker).isStrong()) {
             return UploadPlan.confirmationRequired(conflicts);
         }
-        return UploadPlan.ready(buildResolvedDocument(localStore.loadCurrentDocument(), conflicts), remoteVersionMarker);
+        SyncDocument currentDocument = localStore.loadCurrentDocument();
+        if (!conflictLocalSnapshotsMatch(currentDocument, conflicts)) {
+            return UploadPlan.localChanged(conflicts);
+        }
+        return UploadPlan.ready(
+                buildResolvedDocument(currentDocument, conflicts),
+                remoteVersionMarker,
+                currentDocument);
     }
 
     public WebDavSyncResult resumeResolvedConflicts() {
@@ -104,17 +112,24 @@ public final class ResolvedConflictSyncService {
                     WebDavSyncResult.Status.CONFIRMATION_REQUIRED,
                     "Resolved conflicts cannot be uploaded safely without confirmation");
         }
+        if (plan.getStatus() == UploadPlan.Status.LOCAL_CHANGED) {
+            return localChanged();
+        }
+
+        WebDavSyncResult staleLocalResult = validateLocalUnchanged(plan.getExpectedDocument());
+        if (staleLocalResult != null) {
+            return staleLocalResult;
+        }
 
         WebDavPutResult put = uploader.uploadResolvedDocument(
                 plan.getDocument(),
                 plan.getRemoteVersionMarker());
         if (put.getStatus() == WebDavPutResult.Status.SUCCESS) {
-            try {
-                localStore.applyDocument(plan.getDocument());
-            } catch (RuntimeException e) {
-                return WebDavSyncResult.status(
-                        WebDavSyncResult.Status.LOCAL_APPLY_ERROR,
-                        "Local resolved sync document apply failed");
+            WebDavSyncResult applyResult = applyResolvedDocumentIfCurrent(
+                    plan.getExpectedDocument(),
+                    plan.getDocument());
+            if (applyResult != null) {
+                return applyResult;
             }
             SyncStateRecorder.recordSuccessfulUpload(
                     metadataStore,
@@ -138,6 +153,34 @@ public final class ResolvedConflictSyncService {
         return WebDavSyncResult.status(WebDavSyncResult.Status.SERVER_ERROR, put.getMessage());
     }
 
+    private WebDavSyncResult validateLocalUnchanged(SyncDocument expectedDocument) {
+        try {
+            if (!localStore.isCurrentDocument(expectedDocument)) {
+                return localChanged();
+            }
+            return null;
+        } catch (RuntimeException e) {
+            return WebDavSyncResult.status(
+                    WebDavSyncResult.Status.LOCAL_APPLY_ERROR,
+                    "Local resolved sync document validation failed");
+        }
+    }
+
+    private WebDavSyncResult applyResolvedDocumentIfCurrent(
+            SyncDocument expectedDocument,
+            SyncDocument document) {
+        try {
+            if (!localStore.applyDocumentIfCurrent(expectedDocument, document)) {
+                return localChanged();
+            }
+            return null;
+        } catch (RuntimeException e) {
+            return WebDavSyncResult.status(
+                    WebDavSyncResult.Status.LOCAL_APPLY_ERROR,
+                    "Local resolved sync document apply failed");
+        }
+    }
+
     private static SyncDocument buildResolvedDocument(
             SyncDocument currentDocument,
             List<SyncConflict> conflicts) {
@@ -152,6 +195,48 @@ public final class ResolvedConflictSyncService {
             bySyncId.put(conflict.getSyncId(), resolvedItem(conflict));
         }
         return new SyncDocument(new ArrayList<SyncItem>(bySyncId.values()));
+    }
+
+    private static boolean conflictLocalSnapshotsMatch(
+            SyncDocument currentDocument,
+            List<SyncConflict> conflicts) {
+        if (currentDocument == null) {
+            throw new IllegalStateException("Current local sync document is not available");
+        }
+        LinkedHashMap<String, SyncItem> bySyncId = new LinkedHashMap<String, SyncItem>();
+        for (SyncItem item: currentDocument.getItems()) {
+            bySyncId.put(item.getSyncId(), item);
+        }
+        for (SyncConflict conflict: conflicts) {
+            if (!sameItem(bySyncId.get(conflict.getSyncId()), conflict.getLocalItem())) {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private static boolean sameItem(SyncItem left, SyncItem right) {
+        if (left == null || right == null) {
+            return left == right;
+        }
+        return sameString(left.getSyncId(), right.getSyncId())
+                && sameString(left.getName(), right.getName())
+                && left.getStatus() == right.getStatus()
+                && left.isDeleted() == right.isDeleted()
+                && left.getModifiedAt() == right.getModifiedAt()
+                && sameModifiedBy(left.getModifiedBy(), right.getModifiedBy());
+    }
+
+    private static boolean sameModifiedBy(ModifiedBy left, ModifiedBy right) {
+        if (left == null || right == null) {
+            return left == right;
+        }
+        return sameString(left.getName(), right.getName())
+                && sameString(left.getClientId(), right.getClientId());
+    }
+
+    private static boolean sameString(String left, String right) {
+        return left == null ? right == null : left.equals(right);
     }
 
     private static SyncItem resolvedItem(SyncConflict conflict) {
@@ -211,6 +296,12 @@ public final class ResolvedConflictSyncService {
         return etag.getValue();
     }
 
+    private static WebDavSyncResult localChanged() {
+        return WebDavSyncResult.status(
+                WebDavSyncResult.Status.LOCAL_CHANGED,
+                "Local items changed during resolved conflict synchronization; please retry");
+    }
+
     public interface ConflictUploader {
         WebDavPutResult uploadResolvedDocument(SyncDocument document, String remoteVersionMarker);
     }
@@ -221,41 +312,52 @@ public final class ResolvedConflictSyncService {
             READY,
             BLOCKED_UNRESOLVED,
             CONFIRMATION_REQUIRED,
+            LOCAL_CHANGED,
             NO_CONFLICTS
         }
 
         private final Status status;
         private final SyncDocument document;
+        private final SyncDocument expectedDocument;
         private final String remoteVersionMarker;
         private final List<SyncConflict> conflicts;
 
         private UploadPlan(
                 Status status,
                 SyncDocument document,
+                SyncDocument expectedDocument,
                 String remoteVersionMarker,
                 List<SyncConflict> conflicts) {
             this.status = status;
             this.document = document;
+            this.expectedDocument = expectedDocument;
             this.remoteVersionMarker = remoteVersionMarker;
             this.conflicts = conflicts == null
                     ? new ArrayList<SyncConflict>()
                     : new ArrayList<SyncConflict>(conflicts);
         }
 
-        static UploadPlan ready(SyncDocument document, String remoteVersionMarker) {
-            return new UploadPlan(Status.READY, document, remoteVersionMarker, null);
+        static UploadPlan ready(
+                SyncDocument document,
+                String remoteVersionMarker,
+                SyncDocument expectedDocument) {
+            return new UploadPlan(Status.READY, document, expectedDocument, remoteVersionMarker, null);
         }
 
         static UploadPlan blocked(List<SyncConflict> conflicts) {
-            return new UploadPlan(Status.BLOCKED_UNRESOLVED, null, null, conflicts);
+            return new UploadPlan(Status.BLOCKED_UNRESOLVED, null, null, null, conflicts);
         }
 
         static UploadPlan confirmationRequired(List<SyncConflict> conflicts) {
-            return new UploadPlan(Status.CONFIRMATION_REQUIRED, null, null, conflicts);
+            return new UploadPlan(Status.CONFIRMATION_REQUIRED, null, null, null, conflicts);
+        }
+
+        static UploadPlan localChanged(List<SyncConflict> conflicts) {
+            return new UploadPlan(Status.LOCAL_CHANGED, null, null, null, conflicts);
         }
 
         static UploadPlan noConflicts() {
-            return new UploadPlan(Status.NO_CONFLICTS, null, null, null);
+            return new UploadPlan(Status.NO_CONFLICTS, null, null, null, null);
         }
 
         public Status getStatus() {
@@ -264,6 +366,10 @@ public final class ResolvedConflictSyncService {
 
         public SyncDocument getDocument() {
             return document;
+        }
+
+        SyncDocument getExpectedDocument() {
+            return expectedDocument;
         }
 
         public String getRemoteVersionMarker() {

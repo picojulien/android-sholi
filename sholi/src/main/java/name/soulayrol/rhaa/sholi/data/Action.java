@@ -193,6 +193,7 @@ public abstract class Action {
             item = (Item) adapter.getItem(i);
             if (prevStatus == -1 || item.getStatus() == prevStatus) {
                 item.setStatus(status);
+                Operations.touch(item);
                 items.add(item);
             }
         }
@@ -203,6 +204,8 @@ public abstract class Action {
 
     protected long getNbItemsByStatus(CheckingFragment fragment, int status) {
         QueryBuilder builder = fragment.getSession().getItemDao().queryBuilder();
-        return builder.where(ItemDao.Properties.Status.eq(status)).buildCount().count();
+        return builder.where(
+                ItemDao.Properties.Status.eq(status),
+                ItemDao.Properties.Deleted.eq(false)).buildCount().count();
     }
 }

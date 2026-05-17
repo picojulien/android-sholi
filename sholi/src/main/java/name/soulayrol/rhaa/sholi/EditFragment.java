@@ -36,6 +36,7 @@ import android.widget.TextView;
 
 import de.greenrobot.dao.query.LazyList;
 import de.greenrobot.dao.query.QueryBuilder;
+import name.soulayrol.rhaa.sholi.data.Operations;
 import name.soulayrol.rhaa.sholi.data.model.Checkable;
 import name.soulayrol.rhaa.sholi.data.model.Item;
 import name.soulayrol.rhaa.sholi.data.model.ItemDao;
@@ -107,6 +108,7 @@ public class EditFragment extends AbstractListFragment {
         LazyList<Item> list;
 
         // First build the list to be displayed with loose search.
+        builder.where(ItemDao.Properties.Deleted.eq(false));
         if (_newItemEdit != null) {
             constraint = _newItemEdit.getEditableText().toString().trim();
             if (constraint != null && !constraint.isEmpty())
@@ -122,7 +124,9 @@ public class EditFragment extends AbstractListFragment {
                 doShow = !list.get(0).getName().equals(constraint);
             else if (list.size() > 1) {
                 builder = getSession().getItemDao().queryBuilder();
-                doShow = builder.where(ItemDao.Properties.Name.eq(constraint))
+                doShow = builder.where(
+                        ItemDao.Properties.Name.eq(constraint),
+                        ItemDao.Properties.Deleted.eq(false))
                         .buildCount().count() == 0;
             }
         }
@@ -150,12 +154,29 @@ public class EditFragment extends AbstractListFragment {
                 break;
         }
 
+        Operations.touch(item);
         getSession().getItemDao().update(item);
         getAdapter().notifyDataSetChanged();
     }
 
     private long addItem(String name) {
-        return getSession().getItemDao().insert(new Item(null, name, Checkable.UNCHECKED));
+        Item existing = findItemByName(name);
+        if (existing != null) {
+            if (Boolean.TRUE.equals(existing.getDeleted())) {
+                existing.setStatus(Checkable.UNCHECKED);
+                Operations.restore(existing);
+                getSession().getItemDao().update(existing);
+                return existing.getId();
+            }
+            return 0;
+        }
+        return getSession().getItemDao().insert(Operations.newItem(name, Checkable.UNCHECKED));
+    }
+
+    private Item findItemByName(String name) {
+        return getSession().getItemDao().queryBuilder()
+                .where(ItemDao.Properties.Name.eq(name))
+                .unique();
     }
 
     private class SelectionModeHandler implements ListView.MultiChoiceModeListener {
@@ -196,7 +217,7 @@ public class EditFragment extends AbstractListFragment {
                     @Override
                     public void run() {
                         for (long id : getListView().getCheckedItemIds())
-                            getSession().getItemDao().deleteByKey(id);
+                            markItemDeleted(id);
                     }
                 });
                 getAdapter().setLazyList(createList(getActivity()));
@@ -208,6 +229,14 @@ public class EditFragment extends AbstractListFragment {
         @Override
         public void onDestroyActionMode(ActionMode mode) {
             _newItemEdit.setVisibility(View.VISIBLE);
+        }
+
+        private void markItemDeleted(long id) {
+            Item item = getSession().getItemDao().load(id);
+            if (item != null && !Boolean.TRUE.equals(item.getDeleted())) {
+                Operations.markDeleted(item);
+                getSession().getItemDao().update(item);
+            }
         }
     }
 }

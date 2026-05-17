@@ -29,10 +29,13 @@ import android.view.ViewGroup;
 import android.widget.Button;
 import android.widget.TextView;
 
+import java.util.List;
+
 import de.greenrobot.dao.query.LazyList;
 import name.soulayrol.rhaa.sholi.data.Operations;
 import name.soulayrol.rhaa.sholi.data.model.DaoSession;
 import name.soulayrol.rhaa.sholi.data.model.Item;
+import name.soulayrol.rhaa.sholi.data.model.ItemDao;
 
 
 public class DataOverviewFragment extends Fragment {
@@ -64,7 +67,9 @@ public class DataOverviewFragment extends Fragment {
             public void onClick(View v) {
                 StringBuilder builder = new StringBuilder();
                 Intent intent = new Intent(Intent.ACTION_SEND);
-                LazyList<Item> items = _session.getItemDao().queryBuilder().listLazy();
+                LazyList<Item> items = _session.getItemDao().queryBuilder()
+                        .where(ItemDao.Properties.Deleted.eq(false))
+                        .listLazy();
                 Operations.serialize(getActivity(), items, builder);
                 items.close();
 
@@ -88,7 +93,7 @@ public class DataOverviewFragment extends Fragment {
                         .setPositiveButton(android.R.string.yes,
                                 new DialogInterface.OnClickListener() {
                                     public void onClick(DialogInterface dialog, int id) {
-                                        _session.deleteAll(Item.class);
+                                        markVisibleItemsDeleted();
                                         updateView();
                                     }
                                 })
@@ -108,10 +113,25 @@ public class DataOverviewFragment extends Fragment {
     }
 
     private void updateView() {
-        long count = _session.getItemDao().count();
+        long count = Operations.countVisibleItems(_session);
         _summary.setText(getResources().getQuantityString(
                 R.plurals.fragment_data_overview_text, (int)count, count));
         _exportButton.setEnabled(count > 0);
         _eraseButton.setEnabled(count > 0);
+    }
+
+    private void markVisibleItemsDeleted() {
+        _session.runInTx(new Runnable() {
+            @Override
+            public void run() {
+                List<Item> items = _session.getItemDao().queryBuilder()
+                        .where(ItemDao.Properties.Deleted.eq(false))
+                        .list();
+                for (Item item: items) {
+                    Operations.markDeleted(item);
+                    _session.getItemDao().update(item);
+                }
+            }
+        });
     }
 }

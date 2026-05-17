@@ -20,7 +20,8 @@ public final class WebDavSyncResult {
         NETWORK_ERROR,
         SERVER_ERROR,
         INVALID_REMOTE_DOCUMENT,
-        LOCAL_APPLY_ERROR
+        LOCAL_APPLY_ERROR,
+        CONFIGURATION_ERROR
     }
 
     private final Status status;

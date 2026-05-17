@@ -40,6 +40,8 @@ import name.soulayrol.rhaa.sholi.data.Operations;
 import name.soulayrol.rhaa.sholi.data.model.Checkable;
 import name.soulayrol.rhaa.sholi.data.model.Item;
 import name.soulayrol.rhaa.sholi.data.model.ItemDao;
+import name.soulayrol.rhaa.sholi.sync.items.ItemAddResolution;
+import name.soulayrol.rhaa.sholi.sync.items.ItemSyncMetadata;
 
 
 public class EditFragment extends AbstractListFragment {
@@ -160,22 +162,32 @@ public class EditFragment extends AbstractListFragment {
     }
 
     private long addItem(String name) {
-        Item existing = findItemByName(name);
-        if (existing != null) {
-            if (Boolean.TRUE.equals(existing.getDeleted())) {
-                existing.setStatus(Checkable.UNCHECKED);
-                Operations.restore(existing);
+        String syncId = ItemSyncMetadata.initialSyncIdForName(name);
+        Item existing = findItemBySyncId(syncId);
+        ItemAddResolution resolution = ItemAddResolution.resolve(syncId, existing);
+        switch (resolution.getAction()) {
+            case RESTORE_TOMBSTONE:
+                ItemAddResolution.restoreTombstone(
+                        existing,
+                        Checkable.UNCHECKED,
+                        System.currentTimeMillis(),
+                        ItemSyncMetadata.DEFAULT_MODIFIED_BY_NAME);
                 getSession().getItemDao().update(existing);
                 return existing.getId();
-            }
-            return 0;
+            case IGNORE_ACTIVE_DUPLICATE:
+                return 0;
+            case INSERT_NEW:
+                Item item = Operations.newItem(name, Checkable.UNCHECKED);
+                item.setSyncId(resolution.getSyncId());
+                return getSession().getItemDao().insert(item);
+            default:
+                throw new IllegalStateException("Unsupported add action: " + resolution.getAction());
         }
-        return getSession().getItemDao().insert(Operations.newItem(name, Checkable.UNCHECKED));
     }
 
-    private Item findItemByName(String name) {
+    private Item findItemBySyncId(String syncId) {
         return getSession().getItemDao().queryBuilder()
-                .where(ItemDao.Properties.Name.eq(name))
+                .where(ItemDao.Properties.SyncId.eq(syncId))
                 .unique();
     }
 

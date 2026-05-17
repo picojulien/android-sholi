@@ -1,5 +1,6 @@
 package story2;
 
+import name.soulayrol.rhaa.sholi.sync.document.ModifiedBy;
 import name.soulayrol.rhaa.sholi.sync.document.SyncDocument;
 import name.soulayrol.rhaa.sholi.sync.document.SyncDocumentJson;
 import name.soulayrol.rhaa.sholi.sync.document.SyncDocumentParseException;
@@ -15,6 +16,9 @@ public final class SyncDocumentParsingStoryTest {
         verifyUnknownOptionalFieldsAreIgnored();
         verifyFutureSchemaVersionIsRejected();
         verifyMissingAndInvalidRequiredFieldsAreRejected();
+        verifySemanticRequiredFieldValuesAreRejected();
+        verifyDuplicateObjectKeysAreRejected();
+        verifySyncItemConstructionRejectsInvalidSemanticValues();
     }
 
     private static void verifyRoundTripPreservesSemanticFields() throws Exception {
@@ -93,6 +97,67 @@ public final class SyncDocumentParsingStoryTest {
                 "{\"schema_version\":1,\"items\":{}}",
                 SyncDocumentParseException.Reason.INVALID_FIELD_TYPE,
                 "items must be array");
+    }
+
+    private static void verifySemanticRequiredFieldValuesAreRejected() {
+        assertParseFailure(
+                "{\"schema_version\":1,\"items\":[{\"sync_id\":\"id\",\"name\":\"Milk\","
+                        + "\"status\":-1,\"deleted\":false,\"modified_at\":1,"
+                        + "\"modified_by\":{\"name\":\"phone\"}}]}",
+                SyncDocumentParseException.Reason.INVALID_FIELD_VALUE,
+                "negative status");
+        assertParseFailure(
+                "{\"schema_version\":1,\"items\":[{\"sync_id\":\"id\",\"name\":\"Milk\","
+                        + "\"status\":3,\"deleted\":false,\"modified_at\":1,"
+                        + "\"modified_by\":{\"name\":\"phone\"}}]}",
+                SyncDocumentParseException.Reason.INVALID_FIELD_VALUE,
+                "unknown status");
+        assertParseFailure(
+                "{\"schema_version\":1,\"items\":[{\"sync_id\":\"id\",\"name\":\"Milk\","
+                        + "\"status\":1,\"deleted\":false,\"modified_at\":-1,"
+                        + "\"modified_by\":{\"name\":\"phone\"}}]}",
+                SyncDocumentParseException.Reason.INVALID_FIELD_VALUE,
+                "negative modified_at");
+    }
+
+    private static void verifyDuplicateObjectKeysAreRejected() {
+        assertParseFailure(
+                "{\"schema_version\":1,\"schema_version\":1,\"items\":[]}",
+                SyncDocumentParseException.Reason.MALFORMED_JSON,
+                "duplicate top-level schema_version");
+        assertParseFailure(
+                "{\"schema_version\":1,\"items\":[{\"sync_id\":\"id\",\"sync_id\":\"id-2\","
+                        + "\"name\":\"Milk\",\"status\":1,\"deleted\":false,\"modified_at\":1,"
+                        + "\"modified_by\":{\"name\":\"phone\"}}]}",
+                SyncDocumentParseException.Reason.MALFORMED_JSON,
+                "duplicate item sync_id");
+        assertParseFailure(
+                "{\"schema_version\":1,\"items\":[{\"sync_id\":\"id\",\"name\":\"Milk\","
+                        + "\"status\":1,\"status\":2,\"deleted\":false,\"modified_at\":1,"
+                        + "\"modified_by\":{\"name\":\"phone\"}}]}",
+                SyncDocumentParseException.Reason.MALFORMED_JSON,
+                "duplicate item status");
+        assertParseFailure(
+                "{\"schema_version\":1,\"items\":[{\"sync_id\":\"id\",\"name\":\"Milk\","
+                        + "\"status\":1,\"deleted\":false,\"modified_at\":1,"
+                        + "\"modified_by\":{\"name\":\"phone\",\"name\":\"tablet\"}}]}",
+                SyncDocumentParseException.Reason.MALFORMED_JSON,
+                "duplicate modified_by.name");
+    }
+
+    private static void verifySyncItemConstructionRejectsInvalidSemanticValues() {
+        assertSyncItemConstructionFailure(-1, 1L, "negative status");
+        assertSyncItemConstructionFailure(3, 1L, "unknown status");
+        assertSyncItemConstructionFailure(1, -1L, "negative modified_at");
+    }
+
+    private static void assertSyncItemConstructionFailure(int status, long modifiedAt, String label) {
+        try {
+            new SyncItem("id", "Milk", status, false, modifiedAt, new ModifiedBy("phone", null));
+        } catch (IllegalArgumentException e) {
+            return;
+        }
+        throw new AssertionError("Expected SyncItem construction failure for " + label);
     }
 
     private static void assertParseFailure(

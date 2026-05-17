@@ -2,6 +2,10 @@ package name.soulayrol.rhaa.sholi.sync.document;
 
 public final class SyncItem {
 
+    public static final int STATUS_OFF_LIST = 0;
+    public static final int STATUS_UNCHECKED = 1;
+    public static final int STATUS_CHECKED = 2;
+
     private final String syncId;
     private final String name;
     private final int status;
@@ -21,6 +25,12 @@ public final class SyncItem {
         }
         if (isEmpty(name)) {
             throw new IllegalArgumentException("name must not be empty");
+        }
+        if (!isValidStatus(status)) {
+            throw new IllegalArgumentException("status must be 0, 1, or 2");
+        }
+        if (modifiedAt < 0L) {
+            throw new IllegalArgumentException("modified_at must not be negative");
         }
         if (modifiedBy == null) {
             throw new IllegalArgumentException("modified_by must not be null");
@@ -55,6 +65,10 @@ public final class SyncItem {
 
     public ModifiedBy getModifiedBy() {
         return modifiedBy;
+    }
+
+    public static boolean isValidStatus(int status) {
+        return status == STATUS_OFF_LIST || status == STATUS_UNCHECKED || status == STATUS_CHECKED;
     }
 
     private static boolean isEmpty(String value) {

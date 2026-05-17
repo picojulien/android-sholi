@@ -95,14 +95,14 @@ public final class SyncDocumentJson {
                 itemValue, itemPath, SyncDocumentParseException.Reason.INVALID_FIELD_TYPE);
         String syncId = requireString(itemObject, "sync_id", itemPath + ".sync_id", true);
         String name = requireString(itemObject, "name", itemPath + ".name", true);
-        long statusValue = requireLong(itemObject, "status", itemPath + ".status");
-        if (statusValue < Integer.MIN_VALUE || statusValue > Integer.MAX_VALUE) {
-            throw new SyncDocumentParseException(
-                    SyncDocumentParseException.Reason.INVALID_FIELD_TYPE,
-                    itemPath + ".status");
-        }
+        int status = requireStatus(itemObject, "status", itemPath + ".status");
         boolean deleted = requireBoolean(itemObject, "deleted", itemPath + ".deleted");
         long modifiedAt = requireLong(itemObject, "modified_at", itemPath + ".modified_at");
+        if (modifiedAt < 0L) {
+            throw new SyncDocumentParseException(
+                    SyncDocumentParseException.Reason.INVALID_FIELD_VALUE,
+                    itemPath + ".modified_at");
+        }
         Map<String, Object> modifiedByObject = requireObject(
                 require(itemObject, "modified_by", itemPath + ".modified_by"),
                 itemPath + ".modified_by",
@@ -114,7 +114,7 @@ public final class SyncDocumentJson {
         return new SyncItem(
                 syncId,
                 name,
-                (int) statusValue,
+                status,
                 deleted,
                 modifiedAt,
                 new ModifiedBy(modifiedByName, clientId));
@@ -187,6 +187,18 @@ public final class SyncDocumentJson {
                     path);
         }
         return ((Long) value).longValue();
+    }
+
+    private static int requireStatus(Map<String, Object> object, String field, String path)
+            throws SyncDocumentParseException {
+        long value = requireLong(object, field, path);
+        if (value < Integer.MIN_VALUE || value > Integer.MAX_VALUE
+                || !SyncItem.isValidStatus((int) value)) {
+            throw new SyncDocumentParseException(
+                    SyncDocumentParseException.Reason.INVALID_FIELD_VALUE,
+                    path);
+        }
+        return (int) value;
     }
 
     private static boolean requireBoolean(Map<String, Object> object, String field, String path)
@@ -315,6 +327,9 @@ public final class SyncDocumentJson {
                 skipWhitespace();
                 expect(':');
                 skipWhitespace();
+                if (object.containsKey(key)) {
+                    throw malformed();
+                }
                 object.put(key, parseValue());
                 skipWhitespace();
                 if (peek('}')) {

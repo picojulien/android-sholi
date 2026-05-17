@@ -22,6 +22,8 @@ public final class SyncDocumentAdapterStoryTest {
         verifyAdapterExportsAndAppliesBySyncIdWithoutDuplicates();
         verifyParseAndApplyFailsWithoutLocalDataChanges();
         verifyInvalidRequiredFieldsFailWithoutLocalDataChanges();
+        verifySemanticParseFailuresDoNotMutateLocalData();
+        verifyDuplicateKeyParseFailureDoesNotMutateLocalData();
     }
 
     private static void verifyAdapterExportsAndAppliesBySyncIdWithoutDuplicates() {
@@ -117,6 +119,54 @@ public final class SyncDocumentAdapterStoryTest {
             return;
         }
         throw new AssertionError("Expected missing required field parse failure");
+    }
+
+    private static void verifySemanticParseFailuresDoNotMutateLocalData() {
+        assertParseAndApplyFailureDoesNotMutate(
+                "{\"schema_version\":1,\"items\":[{\"sync_id\":\"sync-b\","
+                        + "\"name\":\"Remote bread\",\"status\":3,\"deleted\":false,"
+                        + "\"modified_at\":1,\"modified_by\":{\"name\":\"remote\"}}]}",
+                SyncDocumentParseException.Reason.INVALID_FIELD_VALUE,
+                "unknown status");
+        assertParseAndApplyFailureDoesNotMutate(
+                "{\"schema_version\":1,\"items\":[{\"sync_id\":\"sync-b\","
+                        + "\"name\":\"Remote bread\",\"status\":1,\"deleted\":false,"
+                        + "\"modified_at\":-1,\"modified_by\":{\"name\":\"remote\"}}]}",
+                SyncDocumentParseException.Reason.INVALID_FIELD_VALUE,
+                "negative modified_at");
+    }
+
+    private static void verifyDuplicateKeyParseFailureDoesNotMutateLocalData() {
+        assertParseAndApplyFailureDoesNotMutate(
+                "{\"schema_version\":1,\"items\":[{\"sync_id\":\"sync-b\","
+                        + "\"name\":\"Remote bread\",\"status\":1,\"deleted\":false,"
+                        + "\"modified_at\":1,\"modified_by\":{\"name\":\"remote\","
+                        + "\"name\":\"tablet\"}}]}",
+                SyncDocumentParseException.Reason.MALFORMED_JSON,
+                "duplicate modified_by.name");
+    }
+
+    private static void assertParseAndApplyFailureDoesNotMutate(
+            String json, SyncDocumentParseException.Reason expectedReason, String label) {
+        FakeStore store = new FakeStore();
+        FakeItem existing = new FakeItem(1L, "Local bread", 1);
+        existing.setSyncId("sync-b");
+        existing.setModifiedAt(Long.valueOf(20L));
+        existing.setModifiedByName("local");
+        existing.setDeleted(Boolean.FALSE);
+        store.add(existing);
+        Map<String, String> before = store.snapshot();
+
+        try {
+            SyncDocumentItemAdapter.parseAndApplyBySyncId(json, store);
+        } catch (SyncDocumentParseException e) {
+            assertEquals(expectedReason, e.getReason(), label + " rejection reason");
+            assertEquals(Integer.valueOf(0), Integer.valueOf(store.transactionCount),
+                    "no transaction after " + label);
+            assertEquals(before, store.snapshot(), "store unchanged after " + label);
+            return;
+        }
+        throw new AssertionError("Expected parse failure for " + label);
     }
 
     private static void assertEquals(Object expected, Object actual, String label) {

@@ -6,6 +6,7 @@ public final class SyncDocumentParseException extends Exception {
         MALFORMED_JSON,
         MISSING_REQUIRED_FIELD,
         INVALID_FIELD_TYPE,
+        INVALID_FIELD_VALUE,
         UNSUPPORTED_SCHEMA_VERSION,
         DUPLICATE_SYNC_ID
     }

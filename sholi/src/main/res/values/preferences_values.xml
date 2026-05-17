@@ -44,5 +44,6 @@
         <item>merge</item>
     </string-array>
     <string name="setting_import_default_value" translatable="false">ignore</string>
+    <string name="settings_webdav_remote_path_default" translatable="false">sholi/sync.json</string>
+    <string name="settings_webdav_display_name_default" translatable="false">ShoLi device</string>
 </resources>
-

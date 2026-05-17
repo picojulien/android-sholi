@@ -51,6 +51,41 @@
     </PreferenceCategory>
 
     <PreferenceCategory
+        android:title="@string/settings_category_webdav_sync"
+        android:key="pref_webdav_sync">
+        <EditTextPreference
+            android:key="pref_webdav_url"
+            android:title="@string/settings_webdav_url_title"
+            android:dialogTitle="@string/settings_webdav_url_title"
+            android:summary="@string/settings_webdav_url_summary" />
+        <EditTextPreference
+            android:key="pref_webdav_username"
+            android:title="@string/settings_webdav_username_title"
+            android:dialogTitle="@string/settings_webdav_username_title" />
+        <EditTextPreference
+            android:key="pref_webdav_password_token"
+            android:title="@string/settings_webdav_token_title"
+            android:dialogTitle="@string/settings_webdav_token_title"
+            android:summary="@string/settings_webdav_token_summary_redacted"
+            android:inputType="textPassword"
+            android:persistent="false" />
+        <EditTextPreference
+            android:key="pref_webdav_remote_path"
+            android:title="@string/settings_webdav_remote_path_title"
+            android:dialogTitle="@string/settings_webdav_remote_path_title"
+            android:defaultValue="@string/settings_webdav_remote_path_default" />
+        <EditTextPreference
+            android:key="pref_webdav_display_name"
+            android:title="@string/settings_webdav_display_name_title"
+            android:dialogTitle="@string/settings_webdav_display_name_title"
+            android:defaultValue="@string/settings_webdav_display_name_default" />
+        <Preference
+            android:key="pref_webdav_test_connection"
+            android:title="@string/settings_webdav_test_connection_title"
+            android:summary="@string/settings_webdav_test_connection_summary" />
+    </PreferenceCategory>
+
+    <PreferenceCategory
         android:title="@string/settings_category_import"
         android:key="pref_others">
         <EditTextPreference

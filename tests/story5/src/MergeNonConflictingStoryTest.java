@@ -23,8 +23,11 @@ public final class MergeNonConflictingStoryTest {
     public static void run() {
         verifyIndependentItemChangesMergeAutomatically();
         verifyIndependentFieldsOnSameItemMergeAutomatically();
+        verifyIndependentFieldMergeUsesLocalEvidenceWhenLocalContributionIsNewest();
         verifyLocalOnlyAndRemoteOnlyChangesMerge();
         verifyTombstonePreventsOlderLiveResurrection();
+        verifyBaselineTombstoneRejectsOlderLiveRemote();
+        verifyBaselineLiveRejectsOlderRemoteTombstone();
         verifyModifiedMetadataAloneDoesNotConflict();
         verifyBaselineAndMarkerUpdateOnlyAfterExplicitSuccess();
     }
@@ -65,6 +68,29 @@ public final class MergeNonConflictingStoryTest {
         assertEquals("Brown rice", merged.getName(), "merged same-item name");
         assertEquals(2, merged.getStatus(), "merged same-item status");
         assertEquals(false, merged.isDeleted(), "merged same-item deleted");
+        assertEquals(30L, merged.getModifiedAt(), "merged same-item modified_at from newest contributor");
+        assertEquals("tablet", merged.getModifiedBy().getName(),
+                "merged same-item modified_by from newest contributor");
+    }
+
+    private static void verifyIndependentFieldMergeUsesLocalEvidenceWhenLocalContributionIsNewest() {
+        SyncItem baseline = item("sync-fields-local-newest", "Rice", 1, false, 10L, "base");
+        SyncItem localChecked = item("sync-fields-local-newest", "Rice", 2, false, 50L, "phone");
+        SyncItem remoteRenamed = item("sync-fields-local-newest", "Brown rice", 1, false, 30L, "tablet");
+
+        SyncMergeResult result = SyncMerger.merge(
+                document(baseline),
+                document(localChecked),
+                document(remoteRenamed),
+                "etag-fields-local-newest",
+                1750L);
+
+        assertEquals(false, result.hasConflicts(), "local newest independent fields conflict flag");
+        SyncItem merged = byId(result.getMergedDocument(), "sync-fields-local-newest");
+        assertEquals("Brown rice", merged.getName(), "local newest merged name");
+        assertEquals(2, merged.getStatus(), "local newest merged status");
+        assertEquals(50L, merged.getModifiedAt(), "local newest merged modified_at");
+        assertEquals("phone", merged.getModifiedBy().getName(), "local newest merged modified_by");
     }
 
     private static void verifyLocalOnlyAndRemoteOnlyChangesMerge() {
@@ -102,6 +128,42 @@ public final class MergeNonConflictingStoryTest {
                 localTombstone,
                 byId(result.getMergedDocument(), "sync-old"),
                 "changed tombstone wins over unchanged live remote");
+    }
+
+    private static void verifyBaselineTombstoneRejectsOlderLiveRemote() {
+        SyncItem baselineTombstone = item("sync-baseline-deleted", "Yogurt", 1, true, 40L, "phone");
+        SyncItem olderRemoteLive = item("sync-baseline-deleted", "Yogurt", 1, false, 10L, "tablet");
+
+        SyncMergeResult result = SyncMerger.merge(
+                document(baselineTombstone),
+                document(baselineTombstone),
+                document(olderRemoteLive),
+                "etag-stale-live",
+                3100L);
+
+        assertEquals(false, result.hasConflicts(), "baseline tombstone versus older live conflict flag");
+        assertItemEquals(
+                baselineTombstone,
+                byId(result.getMergedDocument(), "sync-baseline-deleted"),
+                "baseline tombstone blocks older live remote");
+    }
+
+    private static void verifyBaselineLiveRejectsOlderRemoteTombstone() {
+        SyncItem baselineLive = item("sync-baseline-live", "Yogurt", 1, false, 40L, "phone");
+        SyncItem olderRemoteTombstone = item("sync-baseline-live", "Yogurt", 1, true, 10L, "tablet");
+
+        SyncMergeResult result = SyncMerger.merge(
+                document(baselineLive),
+                document(baselineLive),
+                document(olderRemoteTombstone),
+                "etag-stale-delete",
+                3200L);
+
+        assertEquals(false, result.hasConflicts(), "baseline live versus older tombstone conflict flag");
+        assertItemEquals(
+                baselineLive,
+                byId(result.getMergedDocument(), "sync-baseline-live"),
+                "baseline live blocks older remote tombstone");
     }
 
     private static void verifyModifiedMetadataAloneDoesNotConflict() {

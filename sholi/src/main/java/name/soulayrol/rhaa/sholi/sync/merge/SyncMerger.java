@@ -76,6 +76,20 @@ public final class SyncMerger {
 
         boolean localChanged = !sameSemanticItem(baseline, local);
         boolean remoteChanged = !sameSemanticItem(baseline, remote);
+        if (local != null && remote != null && local.isDeleted() != remote.isDeleted()) {
+            ItemMerge tombstoneLiveMerge = mergeTombstoneLive(
+                    syncId,
+                    baseline,
+                    local,
+                    remote,
+                    localChanged,
+                    remoteChanged,
+                    remoteVersionMarker,
+                    conflictTimestamp);
+            if (tombstoneLiveMerge != null) {
+                return tombstoneLiveMerge;
+            }
+        }
         if (!localChanged && !remoteChanged) {
             return ItemMerge.item(preferPresent(local, remote, baseline));
         }
@@ -96,6 +110,27 @@ public final class SyncMerger {
             return conflict(syncId, baseline, local, remote, remoteVersionMarker, conflictTimestamp);
         }
         return ItemMerge.item(mergeIndependentFieldChanges(baseline, local, remote));
+    }
+
+    private static ItemMerge mergeTombstoneLive(
+            String syncId,
+            SyncItem baseline,
+            SyncItem local,
+            SyncItem remote,
+            boolean localChanged,
+            boolean remoteChanged,
+            String remoteVersionMarker,
+            long conflictTimestamp) {
+        if (localChanged && remoteChanged) {
+            return conflict(syncId, baseline, local, remote, remoteVersionMarker, conflictTimestamp);
+        }
+        if (localChanged) {
+            return ItemMerge.item(isNotNewerThanBaseline(local, baseline) ? remote : local);
+        }
+        if (remoteChanged) {
+            return ItemMerge.item(isNotNewerThanBaseline(remote, baseline) ? local : remote);
+        }
+        return null;
     }
 
     private static ItemMerge mergeWithoutBaseline(
@@ -141,24 +176,59 @@ public final class SyncMerger {
     }
 
     private static SyncItem mergeIndependentFieldChanges(SyncItem baseline, SyncItem local, SyncItem remote) {
-        String name = !equals(baseline.getName(), local.getName())
-                ? local.getName()
-                : (!equals(baseline.getName(), remote.getName()) ? remote.getName() : baseline.getName());
-        int status = baseline.getStatus() != local.getStatus()
-                ? local.getStatus()
-                : (baseline.getStatus() != remote.getStatus() ? remote.getStatus() : baseline.getStatus());
-        boolean deleted = baseline.isDeleted() != local.isDeleted()
-                ? local.isDeleted()
-                : (baseline.isDeleted() != remote.isDeleted() ? remote.isDeleted() : baseline.isDeleted());
+        boolean localContributes = false;
+        boolean remoteContributes = false;
 
-        if (sameSemanticValues(local, name, status, deleted)) {
+        boolean localNameChanged = !equals(baseline.getName(), local.getName());
+        boolean remoteNameChanged = !equals(baseline.getName(), remote.getName());
+        String name = baseline.getName();
+        if (localNameChanged) {
+            name = local.getName();
+            localContributes = true;
+        } else if (remoteNameChanged) {
+            name = remote.getName();
+            remoteContributes = true;
+        }
+        if (remoteNameChanged && equals(remote.getName(), name)) {
+            remoteContributes = true;
+        }
+
+        boolean localStatusChanged = baseline.getStatus() != local.getStatus();
+        boolean remoteStatusChanged = baseline.getStatus() != remote.getStatus();
+        int status = baseline.getStatus();
+        if (localStatusChanged) {
+            status = local.getStatus();
+            localContributes = true;
+        } else if (remoteStatusChanged) {
+            status = remote.getStatus();
+            remoteContributes = true;
+        }
+        if (remoteStatusChanged && remote.getStatus() == status) {
+            remoteContributes = true;
+        }
+
+        boolean localDeletedChanged = baseline.isDeleted() != local.isDeleted();
+        boolean remoteDeletedChanged = baseline.isDeleted() != remote.isDeleted();
+        boolean deleted = baseline.isDeleted();
+        if (localDeletedChanged) {
+            deleted = local.isDeleted();
+            localContributes = true;
+        } else if (remoteDeletedChanged) {
+            deleted = remote.isDeleted();
+            remoteContributes = true;
+        }
+        if (remoteDeletedChanged && remote.isDeleted() == deleted) {
+            remoteContributes = true;
+        }
+
+        SyncItem evidenceSource = chooseEvidenceSource(local, remote, localContributes, remoteContributes);
+        if (sameMergedItem(local, name, status, deleted, evidenceSource)) {
             return local;
         }
-        if (sameSemanticValues(remote, name, status, deleted)) {
+        if (sameMergedItem(remote, name, status, deleted, evidenceSource)) {
             return remote;
         }
 
-        SyncItem evidenceSource = !sameSemanticItem(baseline, local) ? local : remote;
         return new SyncItem(
                 baseline.getSyncId(),
                 name,
@@ -166,6 +236,20 @@ public final class SyncMerger {
                 deleted,
                 evidenceSource.getModifiedAt(),
                 evidenceSource.getModifiedBy());
+    }
+
+    private static SyncItem chooseEvidenceSource(
+            SyncItem local, SyncItem remote, boolean localContributes, boolean remoteContributes) {
+        if (localContributes && remoteContributes) {
+            return local.getModifiedAt() >= remote.getModifiedAt() ? local : remote;
+        }
+        if (localContributes) {
+            return local;
+        }
+        if (remoteContributes) {
+            return remote;
+        }
+        return local;
     }
 
     private static ItemMerge conflict(
@@ -225,6 +309,22 @@ public final class SyncMerger {
         return equals(item.getName(), name)
                 && item.getStatus() == status
                 && item.isDeleted() == deleted;
+    }
+
+    private static boolean sameMergedItem(
+            SyncItem item, String name, int status, boolean deleted, SyncItem evidenceSource) {
+        return sameSemanticValues(item, name, status, deleted)
+                && item.getModifiedAt() == evidenceSource.getModifiedAt()
+                && sameModifiedBy(item, evidenceSource);
+    }
+
+    private static boolean sameModifiedBy(SyncItem left, SyncItem right) {
+        return equals(left.getModifiedBy().getName(), right.getModifiedBy().getName())
+                && equals(left.getModifiedBy().getClientId(), right.getModifiedBy().getClientId());
+    }
+
+    private static boolean isNotNewerThanBaseline(SyncItem item, SyncItem baseline) {
+        return item.getModifiedAt() <= baseline.getModifiedAt();
     }
 
     private static SyncItem preferPresent(SyncItem first, SyncItem second, SyncItem fallback) {

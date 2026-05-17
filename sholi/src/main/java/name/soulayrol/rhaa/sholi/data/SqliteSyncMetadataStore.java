@@ -5,18 +5,15 @@ import android.database.Cursor;
 import android.database.sqlite.SQLiteDatabase;
 
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 
 import name.soulayrol.rhaa.sholi.data.model.DaoSession;
 import name.soulayrol.rhaa.sholi.sync.document.SyncDocument;
-import name.soulayrol.rhaa.sholi.sync.document.SyncDocumentJson;
-import name.soulayrol.rhaa.sholi.sync.document.SyncDocumentParseException;
-import name.soulayrol.rhaa.sholi.sync.document.SyncItem;
 import name.soulayrol.rhaa.sholi.sync.merge.SyncConflict;
 import name.soulayrol.rhaa.sholi.sync.merge.SyncMetadataStore;
+import name.soulayrol.rhaa.sholi.sync.merge.SyncMetadataPersistence;
 
-public final class SqliteSyncMetadataStore implements SyncMetadataStore {
+public final class SqliteSyncMetadataStore implements SyncMetadataStore, SyncMetadataPersistence.Storage {
 
     private static final String BASELINE_TABLE = "sync_baseline";
     private static final String CONFLICT_TABLE = "sync_conflicts";
@@ -33,6 +30,7 @@ public final class SqliteSyncMetadataStore implements SyncMetadataStore {
 
     private final DaoSession daoSession;
     private final SQLiteDatabase database;
+    private final SyncMetadataPersistence persistence;
 
     public SqliteSyncMetadataStore(DaoSession daoSession, SQLiteDatabase database) {
         if (daoSession == null) {
@@ -43,6 +41,7 @@ public final class SqliteSyncMetadataStore implements SyncMetadataStore {
         }
         this.daoSession = daoSession;
         this.database = database;
+        this.persistence = new SyncMetadataPersistence(this);
         createTables(database);
     }
 
@@ -72,15 +71,7 @@ public final class SqliteSyncMetadataStore implements SyncMetadataStore {
 
     @Override
     public SyncDocument loadBaselineDocument() {
-        String baselineJson = loadBaselineColumn(COLUMN_BASELINE_JSON);
-        if (baselineJson == null) {
-            return null;
-        }
-        try {
-            return SyncDocumentJson.parse(baselineJson);
-        } catch (SyncDocumentParseException e) {
-            throw new IllegalStateException("Stored sync baseline is invalid", e);
-        }
+        return persistence.loadBaselineDocument();
     }
 
     @Override
@@ -90,12 +81,7 @@ public final class SqliteSyncMetadataStore implements SyncMetadataStore {
 
     @Override
     public void saveBaselineDocument(SyncDocument document) {
-        if (document == null) {
-            throw new IllegalArgumentException("document must not be null");
-        }
-        ContentValues values = new ContentValues();
-        values.put(COLUMN_BASELINE_JSON, SyncDocumentJson.serialize(document));
-        updateOrInsertBaseline(values);
+        persistence.saveBaselineDocument(document);
     }
 
     @Override
@@ -111,6 +97,37 @@ public final class SqliteSyncMetadataStore implements SyncMetadataStore {
 
     @Override
     public List<SyncConflict> loadConflicts() {
+        return persistence.loadConflicts();
+    }
+
+    @Override
+    public void replaceConflicts(final List<SyncConflict> conflicts) {
+        persistence.replaceConflicts(conflicts);
+    }
+
+    @Override
+    public void clearConflicts() {
+        persistence.clearConflicts();
+    }
+
+    @Override
+    public String loadBaselineDocumentJson() {
+        return loadBaselineColumn(COLUMN_BASELINE_JSON);
+    }
+
+    @Override
+    public void saveBaselineDocumentJson(String baselineDocumentJson) {
+        ContentValues values = new ContentValues();
+        if (baselineDocumentJson == null) {
+            values.putNull(COLUMN_BASELINE_JSON);
+        } else {
+            values.put(COLUMN_BASELINE_JSON, baselineDocumentJson);
+        }
+        updateOrInsertBaseline(values);
+    }
+
+    @Override
+    public List<SyncMetadataPersistence.ConflictRecord> loadConflictRecords() {
         Cursor cursor = database.query(
                 CONFLICT_TABLE,
                 new String[] {
@@ -128,17 +145,18 @@ public final class SqliteSyncMetadataStore implements SyncMetadataStore {
                 null,
                 COLUMN_SYNC_ID);
         try {
-            ArrayList<SyncConflict> conflicts = new ArrayList<SyncConflict>();
+            ArrayList<SyncMetadataPersistence.ConflictRecord> conflicts =
+                    new ArrayList<SyncMetadataPersistence.ConflictRecord>();
             while (cursor.moveToNext()) {
-                conflicts.add(new SyncConflict(
+                conflicts.add(new SyncMetadataPersistence.ConflictRecord(
                         cursor.getString(0),
-                        parseItem(cursor.isNull(1) ? null : cursor.getString(1)),
-                        parseItem(cursor.isNull(2) ? null : cursor.getString(2)),
-                        parseItem(cursor.isNull(3) ? null : cursor.getString(3)),
+                        cursor.isNull(1) ? null : cursor.getString(1),
+                        cursor.isNull(2) ? null : cursor.getString(2),
+                        cursor.isNull(3) ? null : cursor.getString(3),
                         cursor.isNull(4) ? null : cursor.getString(4),
                         cursor.getLong(5),
                         cursor.getString(6),
-                        splitFields(cursor.getString(7))));
+                        cursor.getString(7)));
             }
             return conflicts;
         } finally {
@@ -147,37 +165,22 @@ public final class SqliteSyncMetadataStore implements SyncMetadataStore {
     }
 
     @Override
-    public void replaceConflicts(final List<SyncConflict> conflicts) {
-        if (conflicts == null) {
-            throw new IllegalArgumentException("conflicts must not be null");
-        }
-        daoSession.runInTx(new Runnable() {
-            @Override
-            public void run() {
-                database.delete(CONFLICT_TABLE, null, null);
-                for (SyncConflict conflict: conflicts) {
-                    ContentValues values = new ContentValues();
-                    values.put(COLUMN_SYNC_ID, conflict.getSyncId());
-                    putItem(values, COLUMN_BASELINE_JSON, conflict.getBaselineItem());
-                    putItem(values, COLUMN_LOCAL_JSON, conflict.getLocalItem());
-                    putItem(values, COLUMN_REMOTE_JSON, conflict.getRemoteItem());
-                    if (conflict.getRemoteVersionMarker() == null) {
-                        values.putNull(COLUMN_REMOTE_VERSION_MARKER);
-                    } else {
-                        values.put(COLUMN_REMOTE_VERSION_MARKER, conflict.getRemoteVersionMarker());
-                    }
-                    values.put(COLUMN_CONFLICT_TIMESTAMP, conflict.getConflictTimestamp());
-                    values.put(COLUMN_STATUS, conflict.getStatus());
-                    values.put(COLUMN_CONFLICTING_FIELDS, joinFields(conflict.getConflictingFields()));
-                    database.replace(CONFLICT_TABLE, null, values);
-                }
-            }
-        });
+    public void deleteAllConflictRecords() {
+        database.delete(CONFLICT_TABLE, null, null);
     }
 
     @Override
-    public void clearConflicts() {
-        database.delete(CONFLICT_TABLE, null, null);
+    public void saveConflictRecord(SyncMetadataPersistence.ConflictRecord record) {
+        ContentValues values = new ContentValues();
+        values.put(COLUMN_SYNC_ID, record.getSyncId());
+        putNullable(values, COLUMN_BASELINE_JSON, record.getBaselineItemJson());
+        putNullable(values, COLUMN_LOCAL_JSON, record.getLocalItemJson());
+        putNullable(values, COLUMN_REMOTE_JSON, record.getRemoteItemJson());
+        putNullable(values, COLUMN_REMOTE_VERSION_MARKER, record.getRemoteVersionMarker());
+        values.put(COLUMN_CONFLICT_TIMESTAMP, record.getConflictTimestamp());
+        values.put(COLUMN_STATUS, record.getStatus());
+        values.put(COLUMN_CONFLICTING_FIELDS, record.getConflictingFields());
+        database.replace(CONFLICT_TABLE, null, values);
     }
 
     private String loadBaselineColumn(String column) {
@@ -211,52 +214,11 @@ public final class SqliteSyncMetadataStore implements SyncMetadataStore {
         }
     }
 
-    private static void putItem(ContentValues values, String column, SyncItem item) {
-        if (item == null) {
+    private static void putNullable(ContentValues values, String column, String value) {
+        if (value == null) {
             values.putNull(column);
         } else {
-            values.put(column, SyncDocumentJson.serialize(new SyncDocument(Collections.singletonList(item))));
+            values.put(column, value);
         }
-    }
-
-    private static SyncItem parseItem(String json) {
-        if (json == null) {
-            return null;
-        }
-        try {
-            List<SyncItem> items = SyncDocumentJson.parse(json).getItems();
-            if (items.size() != 1) {
-                throw new IllegalStateException("Stored sync item snapshot is invalid");
-            }
-            return items.get(0);
-        } catch (SyncDocumentParseException e) {
-            throw new IllegalStateException("Stored sync item snapshot is invalid", e);
-        }
-    }
-
-    private static String joinFields(List<String> fields) {
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < fields.size(); ++i) {
-            if (i > 0) {
-                builder.append(',');
-            }
-            builder.append(fields.get(i));
-        }
-        return builder.toString();
-    }
-
-    private static List<String> splitFields(String fields) {
-        ArrayList<String> result = new ArrayList<String>();
-        if (fields == null || fields.length() == 0) {
-            return result;
-        }
-        int start = 0;
-        for (int i = 0; i <= fields.length(); ++i) {
-            if (i == fields.length() || fields.charAt(i) == ',') {
-                result.add(fields.substring(start, i));
-                start = i + 1;
-            }
-        }
-        return result;
     }
 }

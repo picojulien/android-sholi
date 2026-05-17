@@ -100,6 +100,7 @@ public class Operations {
                 for (Map.Entry e: map.entrySet()) {
                     if (line.startsWith((String) e.getValue())) {
                         items.add(newItem(
+                                context,
                                 line.substring(((String) e.getValue()).length()).trim(),
                                 (Integer) e.getKey()));
                         break;
@@ -112,8 +113,16 @@ public class Operations {
     }
 
     public static Item newItem(String name, int status) {
+        return newItem(name, status, DEFAULT_MODIFIED_BY_NAME);
+    }
+
+    public static Item newItem(Context context, String name, int status) {
+        return newItem(name, status, modifiedByName(context));
+    }
+
+    private static Item newItem(String name, int status, String modifiedByName) {
         Item item = new Item(null, name, status, null, null, null, null, null);
-        ItemSyncMetadata.initializeNewItem(item, System.currentTimeMillis(), DEFAULT_MODIFIED_BY_NAME);
+        ItemSyncMetadata.initializeNewItem(item, System.currentTimeMillis(), modifiedByName);
         return item;
     }
 
@@ -121,12 +130,34 @@ public class Operations {
         ItemSyncMetadata.touch(item, System.currentTimeMillis(), DEFAULT_MODIFIED_BY_NAME);
     }
 
+    public static void touch(Context context, Item item) {
+        ItemSyncMetadata.touch(item, System.currentTimeMillis(), modifiedByName(context));
+    }
+
     public static void restore(Item item) {
         ItemSyncMetadata.restore(item, System.currentTimeMillis(), DEFAULT_MODIFIED_BY_NAME);
     }
 
+    public static void restore(Context context, Item item) {
+        ItemSyncMetadata.restore(item, System.currentTimeMillis(), modifiedByName(context));
+    }
+
     public static void markDeleted(Item item) {
         ItemSyncMetadata.markDeleted(item, System.currentTimeMillis(), DEFAULT_MODIFIED_BY_NAME);
+    }
+
+    public static void markDeleted(Context context, Item item) {
+        ItemSyncMetadata.markDeleted(item, System.currentTimeMillis(), modifiedByName(context));
+    }
+
+    public static String modifiedByName(Context context) {
+        if (context == null) {
+            return DEFAULT_MODIFIED_BY_NAME;
+        }
+        SharedPreferences sharedPref = PreferenceManager.getDefaultSharedPreferences(context);
+        return configuredModifiedByName(sharedPref.getString(
+                SettingsActivity.KEY_WEBDAV_DISPLAY_NAME,
+                DEFAULT_MODIFIED_BY_NAME));
     }
 
     public static long countVisibleItems(DaoSession session) {
@@ -267,5 +298,12 @@ public class Operations {
                 context.getResources().getString(R.string.setting_import_default_value)));
 
         return map;
+    }
+
+    private static String configuredModifiedByName(String value) {
+        if (value == null || value.trim().length() == 0) {
+            return DEFAULT_MODIFIED_BY_NAME;
+        }
+        return value.trim();
     }
 }

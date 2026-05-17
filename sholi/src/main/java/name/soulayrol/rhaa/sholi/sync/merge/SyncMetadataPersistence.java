@@ -70,17 +70,21 @@ public final class SyncMetadataPersistence implements SyncMetadataStore {
     }
 
     @Override
+    public SyncDocument loadPendingMergedDocument() {
+        return parseDocument(storage.loadPendingMergedDocumentJson(), "Stored pending merged document is invalid");
+    }
+
+    @Override
+    public SyncDocument loadPendingLocalDocument() {
+        return parseDocument(storage.loadPendingLocalDocumentJson(), "Stored pending local document is invalid");
+    }
+
+    @Override
     public void replaceConflicts(List<SyncConflict> conflicts) {
         if (conflicts == null) {
             throw new IllegalArgumentException("conflicts must not be null");
         }
-        final ArrayList<ConflictRecord> records = new ArrayList<ConflictRecord>(conflicts.size());
-        for (SyncConflict conflict: conflicts) {
-            if (conflict == null) {
-                throw new IllegalArgumentException("conflicts must not contain null entries");
-            }
-            records.add(encodeConflict(conflict));
-        }
+        final ArrayList<ConflictRecord> records = encodeConflicts(conflicts);
         storage.runInTransaction(new Runnable() {
             @Override
             public void run() {
@@ -93,8 +97,51 @@ public final class SyncMetadataPersistence implements SyncMetadataStore {
     }
 
     @Override
+    public void replacePendingConflictState(
+            List<SyncConflict> conflicts,
+            SyncDocument pendingMergedDocument,
+            SyncDocument pendingLocalDocument) {
+        if (conflicts == null) {
+            throw new IllegalArgumentException("conflicts must not be null");
+        }
+        if (pendingMergedDocument == null) {
+            throw new IllegalArgumentException("pendingMergedDocument must not be null");
+        }
+        if (pendingLocalDocument == null) {
+            throw new IllegalArgumentException("pendingLocalDocument must not be null");
+        }
+        final ArrayList<ConflictRecord> records = encodeConflicts(conflicts);
+        final String pendingMergedJson = SyncDocumentJson.serialize(pendingMergedDocument);
+        final String pendingLocalJson = SyncDocumentJson.serialize(pendingLocalDocument);
+        storage.runInTransaction(new Runnable() {
+            @Override
+            public void run() {
+                storage.deleteAllConflictRecords();
+                for (ConflictRecord record: records) {
+                    storage.saveConflictRecord(record);
+                }
+                storage.savePendingMergedDocumentJson(pendingMergedJson);
+                storage.savePendingLocalDocumentJson(pendingLocalJson);
+            }
+        });
+    }
+
+    @Override
     public void clearConflicts() {
         storage.deleteAllConflictRecords();
+        storage.savePendingMergedDocumentJson(null);
+        storage.savePendingLocalDocumentJson(null);
+    }
+
+    private static ArrayList<ConflictRecord> encodeConflicts(List<SyncConflict> conflicts) {
+        ArrayList<ConflictRecord> records = new ArrayList<ConflictRecord>(conflicts.size());
+        for (SyncConflict conflict: conflicts) {
+            if (conflict == null) {
+                throw new IllegalArgumentException("conflicts must not contain null entries");
+            }
+            records.add(encodeConflict(conflict));
+        }
+        return records;
     }
 
     private static ConflictRecord encodeConflict(SyncConflict conflict) {
@@ -143,6 +190,17 @@ public final class SyncMetadataPersistence implements SyncMetadataStore {
         }
     }
 
+    private static SyncDocument parseDocument(String json, String invalidMessage) {
+        if (json == null) {
+            return null;
+        }
+        try {
+            return SyncDocumentJson.parse(json);
+        } catch (SyncDocumentParseException e) {
+            throw new IllegalStateException(invalidMessage, e);
+        }
+    }
+
     private static String joinFields(List<String> fields) {
         StringBuilder builder = new StringBuilder();
         for (int i = 0; i < fields.size(); ++i) {
@@ -181,9 +239,17 @@ public final class SyncMetadataPersistence implements SyncMetadataStore {
 
         String loadRemoteVersionMarker();
 
+        String loadPendingMergedDocumentJson();
+
+        String loadPendingLocalDocumentJson();
+
         void saveBaselineDocumentJson(String baselineDocumentJson);
 
         void saveRemoteVersionMarker(String remoteVersionMarker);
+
+        void savePendingMergedDocumentJson(String pendingMergedDocumentJson);
+
+        void savePendingLocalDocumentJson(String pendingLocalDocumentJson);
 
         List<ConflictRecord> loadConflictRecords();
 

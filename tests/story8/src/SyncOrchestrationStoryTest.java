@@ -39,6 +39,8 @@ public final class SyncOrchestrationStoryTest {
 
     public static void run() throws Exception {
         verifySuccessfulNonConflictingSyncAppliesAndRecordsAfterUpload();
+        verifySuccessfulSyncMarksTombstonesSyncedAndRetainsUntilRetentionWindow();
+        verifySuccessfulSyncCleansOnlyExpiredSyncedTombstones();
         verifyConcurrentLocalEditBeforeMergedUploadPreservesLocalDataAndMetadata();
         verifyConcurrentLocalEditBeforeMergedApplyPreservesLocalDataAndMetadata();
         verifyUploadFailurePreservesLocalDataAndMetadata();
@@ -49,9 +51,12 @@ public final class SyncOrchestrationStoryTest {
         verifyMissingSideResolutionIsRejectedAndConflictStaysUnresolved();
         verifyRemainingUnresolvedConflictBlocksResumeUpload();
         verifyAllResolvedConflictsProduceAndUploadResolvedDocument();
+        verifyResolvedConflictsPreservePendingNonConflictingRemoteChanges();
+        verifyLocalEditToPendingNonConflictBeforeResumeBlocksStaleUpload();
         verifyLocalEditAfterConflictCaptureBeforeResumeDoesNotUploadStaleResolution();
         verifyLocalEditDuringResolvedConflictUploadDoesNotApplyOrRecordStaleResolution();
         verifyUnsafeResolvedConflictMarkerRequiresConfirmationWithoutUpload();
+        verifyConfiguredDisplayNameSourcesLocalEditMetadata();
         verifySyncMenuAndConflictUiSources();
     }
 
@@ -83,6 +88,56 @@ public final class SyncOrchestrationStoryTest {
         assertEquals(0, metadata.loadConflicts().size(), "successful sync clears conflicts");
         assertDoesNotContain(SECRET, result.getMessage(), "sync success message");
         assertDoesNotContain(SECRET, transport.request(2).toString(), "safe upload request string");
+    }
+
+    private static void verifySuccessfulSyncMarksTombstonesSyncedAndRetainsUntilRetentionWindow() {
+        SyncItem live = item("sync-live-retain", "Milk", 1, false, 10L, "phone");
+        SyncItem tombstone = item("sync-delete-retain", "Bread", 1, true, 20L, "phone");
+        SyncDocument local = document(live, tombstone);
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(404, null, null);
+        transport.respond(201, "\"created\"", null);
+        RecordingLocalStore localStore = new RecordingLocalStore(local);
+        RecordingMetadataStore metadata = new RecordingMetadataStore(null, null);
+
+        WebDavSyncResult result = controller(transport, localStore, metadata).synchronize(1010L);
+
+        assertEquals(WebDavSyncResult.Status.CREATED_REMOTE, result.getStatus(),
+                "tombstone mark sync status");
+        assertEquals(true, localStore.deletedSyncedAt("sync-delete-retain") != null,
+                "successful sync marks tombstone included");
+        assertEquals(true, containsId(localStore.currentDocument, "sync-delete-retain"),
+                "fresh synced tombstone retained locally");
+        assertEquals(true, containsId(metadata.loadBaselineDocument(), "sync-delete-retain"),
+                "fresh synced tombstone retained in baseline");
+    }
+
+    private static void verifySuccessfulSyncCleansOnlyExpiredSyncedTombstones() {
+        SyncItem live = item("sync-live-clean", "Milk", 1, false, 10L, "phone");
+        SyncItem expired = item("sync-delete-expired", "Bread", 1, true, 20L, "phone");
+        SyncItem fresh = item("sync-delete-fresh", "Tea", 1, true, 30L, "phone");
+        SyncDocument local = document(expired, fresh, live);
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(404, null, null);
+        transport.respond(201, "\"created\"", null);
+        RecordingLocalStore localStore = new RecordingLocalStore(local);
+        localStore.setDeletedSyncedAt("sync-delete-expired", Long.valueOf(1L));
+        RecordingMetadataStore metadata = new RecordingMetadataStore(null, null);
+
+        WebDavSyncResult result = controller(transport, localStore, metadata).synchronize(1020L);
+
+        assertEquals(WebDavSyncResult.Status.CREATED_REMOTE, result.getStatus(),
+                "tombstone cleanup sync status");
+        assertEquals(true, containsId(parse(transport.request(1).getBody()), "sync-delete-expired"),
+                "expired tombstone included before cleanup upload");
+        assertEquals(false, containsId(localStore.currentDocument, "sync-delete-expired"),
+                "expired synced tombstone cleaned locally after upload");
+        assertEquals(true, containsId(localStore.currentDocument, "sync-delete-fresh"),
+                "fresh tombstone retained locally after upload");
+        assertEquals(true, localStore.deletedSyncedAt("sync-delete-fresh") != null,
+                "fresh tombstone marked included after upload");
+        assertEquals(true, containsId(metadata.loadBaselineDocument(), "sync-delete-expired"),
+                "baseline records successfully uploaded expired tombstone");
     }
 
     private static void verifyConcurrentLocalEditBeforeMergedUploadPreservesLocalDataAndMetadata() {
@@ -442,6 +497,95 @@ public final class SyncOrchestrationStoryTest {
         assertEquals(0, metadata.loadConflicts().size(), "all resolved clears conflicts");
     }
 
+    private static void verifyResolvedConflictsPreservePendingNonConflictingRemoteChanges() {
+        SyncItem baseA = item("sync-conflict-a", "Milk", 1, false, 10L, "base");
+        SyncItem baseB = item("sync-remote-b", "Bread", 1, false, 11L, "base");
+        SyncItem localA = item("sync-conflict-a", "Oat milk", 1, false, 20L, "phone");
+        SyncItem remoteA = item("sync-conflict-a", "Soy milk", 1, false, 30L, "tablet");
+        SyncItem remoteB = item("sync-remote-b", "Bread", 2, false, 40L, "tablet");
+        SyncDocument baseline = document(baseA, baseB);
+        SyncDocument local = document(localA, baseB);
+        SyncDocument remote = document(remoteA, remoteB);
+        SyncDocument expectedResolved = document(localA, remoteB);
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(200, "\"v2\"", null);
+        transport.respond(200, "\"v2\"", json(remote));
+        RecordingLocalStore localStore = new RecordingLocalStore(local);
+        RecordingMetadataStore metadata = new RecordingMetadataStore(baseline, "\"v1\"");
+
+        WebDavSyncResult conflictResult = controller(transport, localStore, metadata).synchronize(1325L);
+        RecordingConflictUploader uploader = new RecordingConflictUploader("\"v3\"");
+        ResolvedConflictSyncService service = new ResolvedConflictSyncService(localStore, metadata, uploader);
+
+        assertEquals(WebDavSyncResult.Status.CONFLICTS, conflictResult.getStatus(),
+                "mixed conflict capture status");
+        assertEquals(1, metadata.loadConflicts().size(), "mixed conflict count");
+        service.choose("sync-conflict-a", ConflictChoice.LOCAL);
+        ResolvedConflictSyncService.UploadPlan plan = service.prepareUpload();
+        WebDavSyncResult result = service.resumeResolvedConflicts();
+
+        assertEquals(ResolvedConflictSyncService.UploadPlan.Status.READY, plan.getStatus(),
+                "mixed resolved upload readiness");
+        assertItemEquals(localA, byId(plan.getDocument(), "sync-conflict-a"),
+                "mixed resolved local conflict choice");
+        assertItemEquals(remoteB, byId(plan.getDocument(), "sync-remote-b"),
+                "mixed resolved keeps remote-only non-conflict");
+        assertEquals(WebDavSyncResult.Status.UPDATED_REMOTE, result.getStatus(),
+                "mixed resolved upload status");
+        assertEquals(1, uploader.uploads.size(), "mixed resolved performs upload");
+        assertDocumentEquals(expectedResolved, uploader.uploads.get(0).document,
+                "mixed resolved upload body preserves pending remote change");
+        assertDocumentEquals(expectedResolved, localStore.currentDocument,
+                "mixed resolved local apply preserves pending remote change");
+        assertDocumentEquals(expectedResolved, metadata.loadBaselineDocument(),
+                "mixed resolved baseline preserves pending remote change");
+        assertEquals("\"v3\"", metadata.loadRemoteVersionMarker(),
+                "mixed resolved records new marker");
+        assertEquals(0, metadata.loadConflicts().size(), "mixed resolved clears conflicts");
+    }
+
+    private static void verifyLocalEditToPendingNonConflictBeforeResumeBlocksStaleUpload() {
+        SyncItem baseA = item("sync-stale-a", "Milk", 1, false, 10L, "base");
+        SyncItem baseB = item("sync-stale-b", "Bread", 1, false, 11L, "base");
+        SyncItem localA = item("sync-stale-a", "Oat milk", 1, false, 20L, "phone");
+        SyncItem remoteA = item("sync-stale-a", "Soy milk", 1, false, 30L, "tablet");
+        SyncItem remoteB = item("sync-stale-b", "Bread", 2, false, 40L, "tablet");
+        SyncItem editedB = item("sync-stale-b", "Sourdough", 1, false, 50L, "phone");
+        SyncDocument baseline = document(baseA, baseB);
+        SyncDocument local = document(localA, baseB);
+        SyncDocument remote = document(remoteA, remoteB);
+        SyncDocument editedLocal = document(localA, editedB);
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(200, "\"v2\"", null);
+        transport.respond(200, "\"v2\"", json(remote));
+        RecordingLocalStore localStore = new RecordingLocalStore(local);
+        RecordingMetadataStore metadata = new RecordingMetadataStore(baseline, "\"v1\"");
+
+        WebDavSyncResult conflictResult = controller(transport, localStore, metadata).synchronize(1335L);
+        RecordingConflictUploader uploader = new RecordingConflictUploader("\"v3\"");
+        ResolvedConflictSyncService service = new ResolvedConflictSyncService(localStore, metadata, uploader);
+
+        assertEquals(WebDavSyncResult.Status.CONFLICTS, conflictResult.getStatus(),
+                "pending stale capture status");
+        service.choose("sync-stale-a", ConflictChoice.LOCAL);
+        localStore.currentDocument = editedLocal;
+        WebDavSyncResult result = service.resumeResolvedConflicts();
+
+        assertEquals(WebDavSyncResult.Status.LOCAL_CHANGED, result.getStatus(),
+                "pending non-conflict stale local edit status");
+        assertEquals(0, uploader.uploads.size(), "pending non-conflict stale edit blocks upload");
+        assertEquals(0, localStore.appliedDocuments.size(),
+                "pending non-conflict stale edit skips local apply");
+        assertDocumentEquals(editedLocal, localStore.currentDocument,
+                "pending non-conflict stale edit preserves active local state");
+        assertDocumentEquals(baseline, metadata.loadBaselineDocument(),
+                "pending non-conflict stale edit preserves baseline");
+        assertEquals("\"v1\"", metadata.loadRemoteVersionMarker(),
+                "pending non-conflict stale edit preserves marker");
+        assertEquals(1, metadata.loadConflicts().size(),
+                "pending non-conflict stale edit keeps conflict metadata");
+    }
+
     private static void verifyLocalEditAfterConflictCaptureBeforeResumeDoesNotUploadStaleResolution() {
         SyncConflict conflict = conflict(
                 "sync-stale-resume",
@@ -555,6 +699,41 @@ public final class SyncOrchestrationStoryTest {
         assertEquals(2, metadata.loadConflicts().size(), "unsafe mixed marker keeps conflicts for later");
     }
 
+    private static void verifyConfiguredDisplayNameSourcesLocalEditMetadata() throws Exception {
+        String operations = readUtf8("sholi/src/main/java/name/soulayrol/rhaa/sholi/data/Operations.java");
+        String editFragment = readUtf8("sholi/src/main/java/name/soulayrol/rhaa/sholi/EditFragment.java");
+        String checkingFragment = readUtf8("sholi/src/main/java/name/soulayrol/rhaa/sholi/CheckingFragment.java");
+        String dataOverviewFragment = readUtf8(
+                "sholi/src/main/java/name/soulayrol/rhaa/sholi/DataOverviewFragment.java");
+        String importFragment = readUtf8("sholi/src/main/java/name/soulayrol/rhaa/sholi/ImportFragment.java");
+        String action = readUtf8("sholi/src/main/java/name/soulayrol/rhaa/sholi/data/Action.java");
+        String adapter = readUtf8(
+                "sholi/src/main/java/name/soulayrol/rhaa/sholi/sync/document/SyncDocumentItemAdapter.java");
+
+        assertContains(operations, "KEY_WEBDAV_DISPLAY_NAME", "operations reads configured display name");
+        assertContains(operations, "modifiedByName(Context context)",
+                "operations configured modifier helper");
+        assertContains(operations, "newItem(Context context", "context-aware item creation");
+        assertContains(operations, "touch(Context context", "context-aware touch");
+        assertContains(operations, "restore(Context context", "context-aware restore");
+        assertContains(operations, "markDeleted(Context context", "context-aware delete");
+        assertContains(editFragment, "Operations.touch(getActivity(), item)",
+                "edit item updates use display name");
+        assertContains(editFragment, "Operations.newItem(getActivity(),",
+                "edit item creation uses display name");
+        assertContains(editFragment, "modifiedByName(getActivity())",
+                "tombstone restore uses display name");
+        assertContains(checkingFragment, "Operations.touch(getActivity(), item)",
+                "checking toggle uses display name");
+        assertContains(dataOverviewFragment, "Operations.markDeleted(getActivity(), item)",
+                "bulk delete uses display name");
+        assertContains(importFragment, "Operations.restore(getActivity(), existing)",
+                "import restore uses display name");
+        assertContains(action, "Operations.touch(fragment.getActivity(), item)",
+                "bulk checking actions use display name");
+        assertContains(adapter, "getModifiedByName()", "export reads item modified_by.name");
+    }
+
     private static void verifySyncMenuAndConflictUiSources() throws Exception {
         String mainMenu = readUtf8("sholi/src/main/res/menu/main.xml");
         String mainActivity = readUtf8("sholi/src/main/java/name/soulayrol/rhaa/sholi/MainActivity.java");
@@ -653,6 +832,15 @@ public final class SyncOrchestrationStoryTest {
             }
         }
         throw new AssertionError("Missing sync_id " + syncId);
+    }
+
+    private static boolean containsId(SyncDocument document, String syncId) {
+        for (SyncItem item: document.getItems()) {
+            if (syncId.equals(item.getSyncId())) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static void assertDocumentEquals(SyncDocument expected, SyncDocument actual, String label) {
@@ -808,6 +996,7 @@ public final class SyncOrchestrationStoryTest {
     private static final class RecordingLocalStore implements LocalSyncDocumentStore {
         private SyncDocument currentDocument;
         private final List<SyncDocument> appliedDocuments = new ArrayList<SyncDocument>();
+        private final Map<String, Long> deletedSyncedAtBySyncId = new LinkedHashMap<String, Long>();
 
         RecordingLocalStore(SyncDocument currentDocument) {
             this.currentDocument = currentDocument;
@@ -837,12 +1026,49 @@ public final class SyncOrchestrationStoryTest {
             applyDocument(document);
             return true;
         }
+
+        @Override
+        public boolean markDeletedSyncedAndCleanupIfCurrent(SyncDocument expectedDocument, long now) {
+            if (!isCurrentDocument(expectedDocument)) {
+                return false;
+            }
+            ArrayList<SyncItem> retained = new ArrayList<SyncItem>();
+            for (SyncItem item: currentDocument.getItems()) {
+                if (!item.isDeleted()) {
+                    retained.add(item);
+                    continue;
+                }
+                Long deletedSyncedAt = deletedSyncedAtBySyncId.get(item.getSyncId());
+                if (deletedSyncedAt != null
+                        && now - deletedSyncedAt.longValue()
+                        >= name.soulayrol.rhaa.sholi.sync.items.ItemSyncMetadata.TOMBSTONE_RETENTION_MILLIS) {
+                    deletedSyncedAtBySyncId.remove(item.getSyncId());
+                    continue;
+                }
+                if (deletedSyncedAt == null) {
+                    deletedSyncedAtBySyncId.put(item.getSyncId(), Long.valueOf(now));
+                }
+                retained.add(item);
+            }
+            currentDocument = new SyncDocument(retained);
+            return true;
+        }
+
+        void setDeletedSyncedAt(String syncId, Long deletedSyncedAt) {
+            deletedSyncedAtBySyncId.put(syncId, deletedSyncedAt);
+        }
+
+        Long deletedSyncedAt(String syncId) {
+            return deletedSyncedAtBySyncId.get(syncId);
+        }
     }
 
     private static final class RecordingMetadataStore implements SyncMetadataStore {
         private SyncDocument baselineDocument;
         private String remoteVersionMarker;
         private List<SyncConflict> conflicts = new ArrayList<SyncConflict>();
+        private SyncDocument pendingMergedDocument;
+        private SyncDocument pendingLocalDocument;
 
         RecordingMetadataStore(SyncDocument baselineDocument, String remoteVersionMarker) {
             this.baselineDocument = baselineDocument;
@@ -880,13 +1106,35 @@ public final class SyncOrchestrationStoryTest {
         }
 
         @Override
+        public SyncDocument loadPendingMergedDocument() {
+            return pendingMergedDocument;
+        }
+
+        @Override
+        public SyncDocument loadPendingLocalDocument() {
+            return pendingLocalDocument;
+        }
+
+        @Override
         public void replaceConflicts(List<SyncConflict> conflicts) {
             this.conflicts = new ArrayList<SyncConflict>(conflicts);
         }
 
         @Override
+        public void replacePendingConflictState(
+                List<SyncConflict> conflicts,
+                SyncDocument pendingMergedDocument,
+                SyncDocument pendingLocalDocument) {
+            this.conflicts = new ArrayList<SyncConflict>(conflicts);
+            this.pendingMergedDocument = pendingMergedDocument;
+            this.pendingLocalDocument = pendingLocalDocument;
+        }
+
+        @Override
         public void clearConflicts() {
             conflicts = new ArrayList<SyncConflict>();
+            pendingMergedDocument = null;
+            pendingLocalDocument = null;
         }
     }
 

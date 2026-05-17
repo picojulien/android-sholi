@@ -11,4 +11,6 @@ public interface LocalSyncDocumentStore {
     void applyDocument(SyncDocument document);
 
     boolean applyDocumentIfCurrent(SyncDocument expectedDocument, SyncDocument document);
+
+    boolean markDeletedSyncedAndCleanupIfCurrent(SyncDocument expectedDocument, long now);
 }

@@ -248,7 +248,7 @@ public class ImportFragment extends DialogFragment {
             if (existing != null) {
                 existing.setName(item.getName());
                 existing.setStatus(item.getStatus());
-                Operations.restore(existing);
+                Operations.restore(getActivity(), existing);
                 session.getItemDao().update(existing);
             } else {
                 session.getItemDao().insert(item);

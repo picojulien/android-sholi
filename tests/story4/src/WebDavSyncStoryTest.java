@@ -543,12 +543,19 @@ public final class WebDavSyncStoryTest {
             applyDocument(document);
             return true;
         }
+
+        @Override
+        public boolean markDeletedSyncedAndCleanupIfCurrent(SyncDocument expectedDocument, long now) {
+            return isCurrentDocument(expectedDocument);
+        }
     }
 
     private static final class RecordingMetadataStore implements SyncMetadataStore {
         private SyncDocument baselineDocument;
         private String remoteVersionMarker;
         private List<SyncConflict> conflicts = new ArrayList<SyncConflict>();
+        private SyncDocument pendingMergedDocument;
+        private SyncDocument pendingLocalDocument;
 
         RecordingMetadataStore() {
         }
@@ -589,13 +596,35 @@ public final class WebDavSyncStoryTest {
         }
 
         @Override
+        public SyncDocument loadPendingMergedDocument() {
+            return pendingMergedDocument;
+        }
+
+        @Override
+        public SyncDocument loadPendingLocalDocument() {
+            return pendingLocalDocument;
+        }
+
+        @Override
         public void replaceConflicts(List<SyncConflict> conflicts) {
             this.conflicts = new ArrayList<SyncConflict>(conflicts);
         }
 
         @Override
+        public void replacePendingConflictState(
+                List<SyncConflict> conflicts,
+                SyncDocument pendingMergedDocument,
+                SyncDocument pendingLocalDocument) {
+            this.conflicts = new ArrayList<SyncConflict>(conflicts);
+            this.pendingMergedDocument = pendingMergedDocument;
+            this.pendingLocalDocument = pendingLocalDocument;
+        }
+
+        @Override
         public void clearConflicts() {
             conflicts = new ArrayList<SyncConflict>();
+            pendingMergedDocument = null;
+            pendingLocalDocument = null;
         }
     }
 }

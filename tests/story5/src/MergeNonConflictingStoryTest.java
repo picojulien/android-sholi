@@ -254,6 +254,8 @@ public final class MergeNonConflictingStoryTest {
         private SyncDocument baselineDocument;
         private String remoteVersionMarker;
         private List<SyncConflict> conflicts = new ArrayList<SyncConflict>();
+        private SyncDocument pendingMergedDocument;
+        private SyncDocument pendingLocalDocument;
         private int transactionCount;
 
         @Override
@@ -288,13 +290,35 @@ public final class MergeNonConflictingStoryTest {
         }
 
         @Override
+        public SyncDocument loadPendingMergedDocument() {
+            return pendingMergedDocument;
+        }
+
+        @Override
+        public SyncDocument loadPendingLocalDocument() {
+            return pendingLocalDocument;
+        }
+
+        @Override
         public void replaceConflicts(List<SyncConflict> conflicts) {
             this.conflicts = new ArrayList<SyncConflict>(conflicts);
         }
 
         @Override
+        public void replacePendingConflictState(
+                List<SyncConflict> conflicts,
+                SyncDocument pendingMergedDocument,
+                SyncDocument pendingLocalDocument) {
+            this.conflicts = new ArrayList<SyncConflict>(conflicts);
+            this.pendingMergedDocument = pendingMergedDocument;
+            this.pendingLocalDocument = pendingLocalDocument;
+        }
+
+        @Override
         public void clearConflicts() {
             conflicts.clear();
+            pendingMergedDocument = null;
+            pendingLocalDocument = null;
         }
     }
 }

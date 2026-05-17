@@ -20,6 +20,8 @@ public final class SqliteSyncMetadataStore implements SyncMetadataStore, SyncMet
     private static final String COLUMN_ID = "_id";
     private static final String COLUMN_BASELINE_JSON = "baseline_json";
     private static final String COLUMN_REMOTE_VERSION_MARKER = "remote_version_marker";
+    private static final String COLUMN_PENDING_MERGED_JSON = "pending_merged_json";
+    private static final String COLUMN_PENDING_LOCAL_JSON = "pending_local_json";
     private static final String COLUMN_SYNC_ID = "sync_id";
     private static final String COLUMN_LOCAL_JSON = "local_json";
     private static final String COLUMN_REMOTE_JSON = "remote_json";
@@ -49,7 +51,11 @@ public final class SqliteSyncMetadataStore implements SyncMetadataStore, SyncMet
         database.execSQL("CREATE TABLE IF NOT EXISTS '" + BASELINE_TABLE + "' ("
                 + "'" + COLUMN_ID + "' TEXT PRIMARY KEY,"
                 + "'" + COLUMN_BASELINE_JSON + "' TEXT,"
-                + "'" + COLUMN_REMOTE_VERSION_MARKER + "' TEXT);");
+                + "'" + COLUMN_REMOTE_VERSION_MARKER + "' TEXT,"
+                + "'" + COLUMN_PENDING_MERGED_JSON + "' TEXT,"
+                + "'" + COLUMN_PENDING_LOCAL_JSON + "' TEXT);");
+        ensureTextColumn(database, BASELINE_TABLE, COLUMN_PENDING_MERGED_JSON);
+        ensureTextColumn(database, BASELINE_TABLE, COLUMN_PENDING_LOCAL_JSON);
         database.execSQL("CREATE TABLE IF NOT EXISTS '" + CONFLICT_TABLE + "' ("
                 + "'" + COLUMN_SYNC_ID + "' TEXT PRIMARY KEY,"
                 + "'" + COLUMN_BASELINE_JSON + "' TEXT,"
@@ -101,8 +107,26 @@ public final class SqliteSyncMetadataStore implements SyncMetadataStore, SyncMet
     }
 
     @Override
+    public SyncDocument loadPendingMergedDocument() {
+        return persistence.loadPendingMergedDocument();
+    }
+
+    @Override
+    public SyncDocument loadPendingLocalDocument() {
+        return persistence.loadPendingLocalDocument();
+    }
+
+    @Override
     public void replaceConflicts(final List<SyncConflict> conflicts) {
         persistence.replaceConflicts(conflicts);
+    }
+
+    @Override
+    public void replacePendingConflictState(
+            List<SyncConflict> conflicts,
+            SyncDocument pendingMergedDocument,
+            SyncDocument pendingLocalDocument) {
+        persistence.replacePendingConflictState(conflicts, pendingMergedDocument, pendingLocalDocument);
     }
 
     @Override
@@ -116,6 +140,16 @@ public final class SqliteSyncMetadataStore implements SyncMetadataStore, SyncMet
     }
 
     @Override
+    public String loadPendingMergedDocumentJson() {
+        return loadBaselineColumn(COLUMN_PENDING_MERGED_JSON);
+    }
+
+    @Override
+    public String loadPendingLocalDocumentJson() {
+        return loadBaselineColumn(COLUMN_PENDING_LOCAL_JSON);
+    }
+
+    @Override
     public void saveBaselineDocumentJson(String baselineDocumentJson) {
         ContentValues values = new ContentValues();
         if (baselineDocumentJson == null) {
@@ -123,6 +157,20 @@ public final class SqliteSyncMetadataStore implements SyncMetadataStore, SyncMet
         } else {
             values.put(COLUMN_BASELINE_JSON, baselineDocumentJson);
         }
+        updateOrInsertBaseline(values);
+    }
+
+    @Override
+    public void savePendingMergedDocumentJson(String pendingMergedDocumentJson) {
+        ContentValues values = new ContentValues();
+        putNullable(values, COLUMN_PENDING_MERGED_JSON, pendingMergedDocumentJson);
+        updateOrInsertBaseline(values);
+    }
+
+    @Override
+    public void savePendingLocalDocumentJson(String pendingLocalDocumentJson) {
+        ContentValues values = new ContentValues();
+        putNullable(values, COLUMN_PENDING_LOCAL_JSON, pendingLocalDocumentJson);
         updateOrInsertBaseline(values);
     }
 
@@ -212,6 +260,20 @@ public final class SqliteSyncMetadataStore implements SyncMetadataStore, SyncMet
             values.put(COLUMN_ID, DEFAULT_ID);
             database.insert(BASELINE_TABLE, null, values);
         }
+    }
+
+    private static void ensureTextColumn(SQLiteDatabase database, String table, String column) {
+        Cursor cursor = database.rawQuery("PRAGMA table_info('" + table + "')", null);
+        try {
+            while (cursor.moveToNext()) {
+                if (column.equals(cursor.getString(1))) {
+                    return;
+                }
+            }
+        } finally {
+            cursor.close();
+        }
+        database.execSQL("ALTER TABLE '" + table + "' ADD COLUMN '" + column + "' TEXT;");
     }
 
     private static void putNullable(ContentValues values, String column, String value) {

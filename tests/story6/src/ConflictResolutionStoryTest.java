@@ -34,6 +34,7 @@ public final class ConflictResolutionStoryTest {
         verifyLocalDeleteVersusRemoteLiveEditConflict();
         verifyBaselineAndMarkerRoundTripThroughPersistenceCodec();
         verifyConflictRecordsPersistAcrossFakeReload();
+        verifyPendingConflictStatePersistsAcrossFakeReloadAndClears();
         verifyConflictReplaceClearSequencingAndTransactionCallback();
         verifyUnresolvedConflictsBlockMergedUploadDocument();
         verifyResolvingLocalVersusRemotePicksCompleteVersion();
@@ -151,6 +152,54 @@ public final class ConflictResolutionStoryTest {
         assertEquals(SyncConflict.STATUS_UNRESOLVED, conflict.getStatus(), "persisted status");
     }
 
+    private static void verifyPendingConflictStatePersistsAcrossFakeReloadAndClears() {
+        SyncItem baseA = item("sync-pending-a", "Milk", 1, false, 10L, "base");
+        SyncItem baseB = item("sync-pending-b", "Bread", 1, false, 11L, "base");
+        SyncItem localA = item("sync-pending-a", "Oat milk", 1, false, 20L, "phone");
+        SyncItem remoteA = item("sync-pending-a", "Soy milk", 1, false, 30L, "tablet");
+        SyncItem remoteB = item("sync-pending-b", "Bread", 2, false, 40L, "tablet");
+        SyncDocument baseline = document(baseA, baseB);
+        SyncDocument local = document(localA, baseB);
+        SyncDocument remote = document(remoteA, remoteB);
+        SyncDocument pendingMerged = document(remoteB);
+        RecordingMetadataStorage storage = new RecordingMetadataStorage();
+        SyncMetadataStore firstOpen = new SyncMetadataPersistence(storage);
+        SyncMergeResult result = SyncMerger.merge(baseline, local, remote, "etag-pending", 4500L);
+
+        SyncStateRecorder.persistConflicts(
+                firstOpen,
+                result.getConflicts(),
+                result.getPendingMergedDocument(),
+                local);
+        SyncMetadataStore reloaded = new SyncMetadataPersistence(storage);
+
+        assertEquals(1, reloaded.loadConflicts().size(), "pending conflict count");
+        assertEquals(
+                SyncDocumentJson.serialize(pendingMerged),
+                SyncDocumentJson.serialize(reloaded.loadPendingMergedDocument()),
+                "pending merged document round-trip");
+        assertEquals(
+                SyncDocumentJson.serialize(local),
+                SyncDocumentJson.serialize(reloaded.loadPendingLocalDocument()),
+                "pending local document round-trip");
+        assertEvents(
+                list("tx:start", "delete-conflicts", "insert-conflict:sync-pending-a",
+                        "save-pending-merged", "save-pending-local", "tx:end"),
+                storage.events,
+                "pending conflict state persistence order");
+
+        storage.events.clear();
+        reloaded.clearConflicts();
+
+        assertEquals(0, reloaded.loadConflicts().size(), "pending conflict clear count");
+        assertEquals(null, reloaded.loadPendingMergedDocument(), "pending merged cleared");
+        assertEquals(null, reloaded.loadPendingLocalDocument(), "pending local cleared");
+        assertEvents(
+                list("delete-conflicts", "save-pending-merged", "save-pending-local"),
+                storage.events,
+                "pending conflict state clear order");
+    }
+
     private static void verifyConflictReplaceClearSequencingAndTransactionCallback() {
         SyncConflict first = conflict(
                 "sync-replace-a",
@@ -184,7 +233,10 @@ public final class ConflictResolutionStoryTest {
 
         storage.events.clear();
         store.clearConflicts();
-        assertEvents(list("delete-conflicts"), storage.events, "clear conflict operation order");
+        assertEvents(
+                list("delete-conflicts", "save-pending-merged", "save-pending-local"),
+                storage.events,
+                "clear conflict operation order");
         assertEquals(0, store.loadConflicts().size(), "clear removes unresolved conflicts");
     }
 
@@ -356,6 +408,8 @@ public final class ConflictResolutionStoryTest {
 
         private String baselineDocumentJson;
         private String remoteVersionMarker;
+        private String pendingMergedDocumentJson;
+        private String pendingLocalDocumentJson;
         private final Map<String, SyncMetadataPersistence.ConflictRecord> conflicts =
                 new LinkedHashMap<String, SyncMetadataPersistence.ConflictRecord>();
         private final List<String> events = new ArrayList<String>();
@@ -380,6 +434,16 @@ public final class ConflictResolutionStoryTest {
         }
 
         @Override
+        public String loadPendingMergedDocumentJson() {
+            return pendingMergedDocumentJson;
+        }
+
+        @Override
+        public String loadPendingLocalDocumentJson() {
+            return pendingLocalDocumentJson;
+        }
+
+        @Override
         public void saveBaselineDocumentJson(String baselineDocumentJson) {
             this.baselineDocumentJson = baselineDocumentJson;
         }
@@ -387,6 +451,18 @@ public final class ConflictResolutionStoryTest {
         @Override
         public void saveRemoteVersionMarker(String remoteVersionMarker) {
             this.remoteVersionMarker = remoteVersionMarker;
+        }
+
+        @Override
+        public void savePendingMergedDocumentJson(String pendingMergedDocumentJson) {
+            events.add("save-pending-merged");
+            this.pendingMergedDocumentJson = pendingMergedDocumentJson;
+        }
+
+        @Override
+        public void savePendingLocalDocumentJson(String pendingLocalDocumentJson) {
+            events.add("save-pending-local");
+            this.pendingLocalDocumentJson = pendingLocalDocumentJson;
         }
 
         @Override

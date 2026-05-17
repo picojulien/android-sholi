@@ -157,7 +157,7 @@ public class CheckingFragment extends AbstractListFragment implements
                 break;
         }
 
-        Operations.touch(item);
+        Operations.touch(getActivity(), item);
         getSession().getItemDao().update(item);
         getAdapter().notifyDataSetChanged();
     }

@@ -6,6 +6,7 @@ import java.util.List;
 
 import name.soulayrol.rhaa.sholi.sync.document.ModifiedBy;
 import name.soulayrol.rhaa.sholi.sync.document.SyncDocument;
+import name.soulayrol.rhaa.sholi.sync.document.SyncDocumentJson;
 import name.soulayrol.rhaa.sholi.sync.document.SyncItem;
 import name.soulayrol.rhaa.sholi.sync.merge.ConflictChoice;
 import name.soulayrol.rhaa.sholi.sync.merge.ConflictResolution;
@@ -88,6 +89,20 @@ public final class ResolvedConflictSyncService {
             return UploadPlan.confirmationRequired(conflicts);
         }
         SyncDocument currentDocument = localStore.loadCurrentDocument();
+        SyncDocument pendingMergedDocument = metadataStore.loadPendingMergedDocument();
+        SyncDocument pendingLocalDocument = metadataStore.loadPendingLocalDocument();
+        if (pendingMergedDocument != null && pendingLocalDocument != null) {
+            if (!sameDocument(currentDocument, pendingLocalDocument)) {
+                return UploadPlan.localChanged(conflicts);
+            }
+            return UploadPlan.ready(
+                    buildResolvedDocument(pendingMergedDocument, conflicts),
+                    remoteVersionMarker,
+                    pendingLocalDocument);
+        }
+        if (pendingMergedDocument != null || pendingLocalDocument != null) {
+            return UploadPlan.localChanged(conflicts);
+        }
         if (!conflictLocalSnapshotsMatch(currentDocument, conflicts)) {
             return UploadPlan.localChanged(conflicts);
         }
@@ -130,6 +145,10 @@ public final class ResolvedConflictSyncService {
                     plan.getDocument());
             if (applyResult != null) {
                 return applyResult;
+            }
+            WebDavSyncResult tombstoneResult = markTombstonesSyncedAndCleanup(plan.getDocument());
+            if (tombstoneResult != null) {
+                return tombstoneResult;
             }
             SyncStateRecorder.recordSuccessfulUpload(
                     metadataStore,
@@ -181,6 +200,21 @@ public final class ResolvedConflictSyncService {
         }
     }
 
+    private WebDavSyncResult markTombstonesSyncedAndCleanup(SyncDocument expectedDocument) {
+        try {
+            if (!localStore.markDeletedSyncedAndCleanupIfCurrent(
+                    expectedDocument,
+                    System.currentTimeMillis())) {
+                return localChanged();
+            }
+            return null;
+        } catch (RuntimeException e) {
+            return WebDavSyncResult.status(
+                    WebDavSyncResult.Status.LOCAL_APPLY_ERROR,
+                    "Local resolved tombstone retention update failed");
+        }
+    }
+
     private static SyncDocument buildResolvedDocument(
             SyncDocument currentDocument,
             List<SyncConflict> conflicts) {
@@ -225,6 +259,13 @@ public final class ResolvedConflictSyncService {
                 && left.isDeleted() == right.isDeleted()
                 && left.getModifiedAt() == right.getModifiedAt()
                 && sameModifiedBy(left.getModifiedBy(), right.getModifiedBy());
+    }
+
+    private static boolean sameDocument(SyncDocument left, SyncDocument right) {
+        if (left == null || right == null) {
+            return left == right;
+        }
+        return SyncDocumentJson.serialize(left).equals(SyncDocumentJson.serialize(right));
     }
 
     private static boolean sameModifiedBy(ModifiedBy left, ModifiedBy right) {

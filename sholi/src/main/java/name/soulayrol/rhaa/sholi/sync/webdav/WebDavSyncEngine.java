@@ -192,7 +192,11 @@ public final class WebDavSyncEngine {
             if (staleLocalResult != null) {
                 return staleLocalResult;
             }
-            SyncStateRecorder.persistConflicts(metadataStore, merge.getConflicts());
+            SyncStateRecorder.persistConflicts(
+                    metadataStore,
+                    merge.getConflicts(),
+                    merge.getPendingMergedDocument(),
+                    localDocument);
             return WebDavSyncResult.conflicts(merge.getConflicts());
         }
 
@@ -258,7 +262,11 @@ public final class WebDavSyncEngine {
             if (staleLocalResult != null) {
                 return staleLocalResult;
             }
-            SyncStateRecorder.persistConflicts(metadataStore, merge.getConflicts());
+            SyncStateRecorder.persistConflicts(
+                    metadataStore,
+                    merge.getConflicts(),
+                    merge.getPendingMergedDocument(),
+                    localDocument);
             return WebDavSyncResult.conflicts(merge.getConflicts());
         }
 
@@ -364,6 +372,10 @@ public final class WebDavSyncEngine {
         if (localResult != null) {
             return localResult;
         }
+        WebDavSyncResult tombstoneResult = markTombstonesSyncedAndCleanup(syncedDocument);
+        if (tombstoneResult != null) {
+            return tombstoneResult;
+        }
         if (upload) {
             SyncStateRecorder.recordSuccessfulUpload(metadataStore, syncedDocument, marker);
         } else {
@@ -400,6 +412,21 @@ public final class WebDavSyncEngine {
         }
     }
 
+    private WebDavSyncResult markTombstonesSyncedAndCleanup(SyncDocument expectedDocument) {
+        try {
+            if (!localStore.markDeletedSyncedAndCleanupIfCurrent(
+                    expectedDocument,
+                    System.currentTimeMillis())) {
+                return localChanged();
+            }
+            return null;
+        } catch (RuntimeException e) {
+            return WebDavSyncResult.status(
+                    WebDavSyncResult.Status.LOCAL_APPLY_ERROR,
+                    "Local tombstone retention update failed");
+        }
+    }
+
     private WebDavSyncResult statusIfLocalUnchanged(
             SyncDocument expectedDocument,
             WebDavSyncResult.Status status,
@@ -407,6 +434,10 @@ public final class WebDavSyncEngine {
         WebDavSyncResult staleLocalResult = validateLocalUnchanged(expectedDocument);
         if (staleLocalResult != null) {
             return staleLocalResult;
+        }
+        WebDavSyncResult tombstoneResult = markTombstonesSyncedAndCleanup(expectedDocument);
+        if (tombstoneResult != null) {
+            return tombstoneResult;
         }
         return WebDavSyncResult.status(status, message);
     }

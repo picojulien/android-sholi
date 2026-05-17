@@ -29,6 +29,26 @@ public final class SyncStateRecorder {
         store.replaceConflicts(conflicts);
     }
 
+    public static void persistConflicts(
+            SyncMetadataStore store,
+            List<SyncConflict> conflicts,
+            SyncDocument pendingMergedDocument,
+            SyncDocument pendingLocalDocument) {
+        if (store == null) {
+            throw new IllegalArgumentException("store must not be null");
+        }
+        if (conflicts == null) {
+            throw new IllegalArgumentException("conflicts must not be null");
+        }
+        if (pendingMergedDocument == null) {
+            throw new IllegalArgumentException("pendingMergedDocument must not be null");
+        }
+        if (pendingLocalDocument == null) {
+            throw new IllegalArgumentException("pendingLocalDocument must not be null");
+        }
+        store.replacePendingConflictState(conflicts, pendingMergedDocument, pendingLocalDocument);
+    }
+
     public static boolean hasUnresolvedConflicts(SyncMetadataStore store) {
         if (store == null) {
             throw new IllegalArgumentException("store must not be null");

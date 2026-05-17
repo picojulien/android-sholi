@@ -156,7 +156,7 @@ public class EditFragment extends AbstractListFragment {
                 break;
         }
 
-        Operations.touch(item);
+        Operations.touch(getActivity(), item);
         getSession().getItemDao().update(item);
         getAdapter().notifyDataSetChanged();
     }
@@ -171,13 +171,13 @@ public class EditFragment extends AbstractListFragment {
                         existing,
                         Checkable.UNCHECKED,
                         System.currentTimeMillis(),
-                        ItemSyncMetadata.DEFAULT_MODIFIED_BY_NAME);
+                        Operations.modifiedByName(getActivity()));
                 getSession().getItemDao().update(existing);
                 return existing.getId();
             case IGNORE_ACTIVE_DUPLICATE:
                 return 0;
             case INSERT_NEW:
-                Item item = Operations.newItem(name, Checkable.UNCHECKED);
+                Item item = Operations.newItem(getActivity(), name, Checkable.UNCHECKED);
                 item.setSyncId(resolution.getSyncId());
                 return getSession().getItemDao().insert(item);
             default:
@@ -246,7 +246,7 @@ public class EditFragment extends AbstractListFragment {
         private void markItemDeleted(long id) {
             Item item = getSession().getItemDao().load(id);
             if (item != null && !Boolean.TRUE.equals(item.getDeleted())) {
-                Operations.markDeleted(item);
+                Operations.markDeleted(getActivity(), item);
                 getSession().getItemDao().update(item);
             }
         }

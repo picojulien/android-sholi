@@ -193,7 +193,7 @@ public abstract class Action {
             item = (Item) adapter.getItem(i);
             if (prevStatus == -1 || item.getStatus() == prevStatus) {
                 item.setStatus(status);
-                Operations.touch(item);
+                Operations.touch(fragment.getActivity(), item);
                 items.add(item);
             }
         }

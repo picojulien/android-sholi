@@ -128,7 +128,7 @@ public class DataOverviewFragment extends Fragment {
                         .where(ItemDao.Properties.Deleted.eq(false))
                         .list();
                 for (Item item: items) {
-                    Operations.markDeleted(item);
+                    Operations.markDeleted(getActivity(), item);
                     _session.getItemDao().update(item);
                 }
             }

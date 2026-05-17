@@ -59,6 +59,10 @@ public final class SyncMergeResult {
         return conflicts;
     }
 
+    public SyncDocument getPendingMergedDocument() {
+        return new SyncDocument(mergedItemsBeforeConflicts);
+    }
+
     List<SyncItem> getMergedItemsBeforeConflicts() {
         return mergedItemsBeforeConflicts;
     }

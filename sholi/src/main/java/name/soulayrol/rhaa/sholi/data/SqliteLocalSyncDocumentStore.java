@@ -8,6 +8,7 @@ import name.soulayrol.rhaa.sholi.data.model.ItemDao;
 import name.soulayrol.rhaa.sholi.sync.document.SyncDocument;
 import name.soulayrol.rhaa.sholi.sync.document.SyncDocumentItemAdapter;
 import name.soulayrol.rhaa.sholi.sync.document.SyncDocumentJson;
+import name.soulayrol.rhaa.sholi.sync.items.ItemSyncMetadata;
 import name.soulayrol.rhaa.sholi.sync.webdav.LocalSyncDocumentStore;
 
 public final class SqliteLocalSyncDocumentStore implements LocalSyncDocumentStore {
@@ -62,6 +63,39 @@ public final class SqliteLocalSyncDocumentStore implements LocalSyncDocumentStor
                     return;
                 }
                 applyDocumentWithStoreTransaction(document, false);
+                applied[0] = true;
+            }
+        });
+        return applied[0];
+    }
+
+    @Override
+    public boolean markDeletedSyncedAndCleanupIfCurrent(final SyncDocument expectedDocument, final long now) {
+        if (expectedDocument == null) {
+            throw new IllegalArgumentException("expectedDocument must not be null");
+        }
+        if (now < 0L) {
+            throw new IllegalArgumentException("now must not be negative");
+        }
+        final boolean[] applied = new boolean[] { false };
+        daoSession.runInTx(new Runnable() {
+            @Override
+            public void run() {
+                if (!sameDocument(loadCurrentDocumentInOrder(), expectedDocument)) {
+                    return;
+                }
+                List<Item> items = daoSession.getItemDao().loadAll();
+                for (Item item: items) {
+                    if (!Boolean.TRUE.equals(item.getDeleted())) {
+                        continue;
+                    }
+                    if (ItemSyncMetadata.isTombstoneReadyForCleanup(item, now)) {
+                        daoSession.getItemDao().delete(item);
+                    } else if (item.getDeletedSyncedAt() == null) {
+                        ItemSyncMetadata.markDeletedSynced(item, now);
+                        daoSession.getItemDao().update(item);
+                    }
+                }
                 applied[0] = true;
             }
         });

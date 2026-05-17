@@ -28,11 +28,16 @@ public final class DocumentationQaTestRunner {
 
         expect("README.md", "README compatibility and features mention sync-capable support",
                 "sholi-dav",
+                "io.github.picojulien.sholidav",
                 "webdav synchronization",
                 "android 6.0/api 23");
+        reject("README.md", "README fork installation package references",
+                "fdid=name.soulayrol.rhaa.sholi",
+                "details?id=name.soulayrol.rhaa.sholi");
 
         expect("doc/manual.md", "English manual documents WebDAV setup and sync behavior",
                 "sholi-dav",
+                "io.github.picojulien.sholidav",
                 "webdav synchronization",
                 "android 6.0/api 23",
                 "webdav url",
@@ -58,9 +63,13 @@ public final class DocumentationQaTestRunner {
                 "modifier",
                 "etag",
                 "blind overwrites");
+        reject("doc/manual.md", "English manual fork installation package references",
+                "fdid=name.soulayrol.rhaa.sholi",
+                "details?id=name.soulayrol.rhaa.sholi");
 
         expect("doc/manual_es.md", "Spanish manual includes concise WebDAV sync update",
                 "sholi-dav",
+                "io.github.picojulien.sholidav",
                 "sincronización webdav",
                 "android 6.0/api 23",
                 "url webdav",
@@ -73,6 +82,9 @@ public final class DocumentationQaTestRunner {
                 "no https",
                 "conflicto",
                 "etag");
+        reject("doc/manual_es.md", "Spanish manual fork installation package references",
+                "fdid=name.soulayrol.rhaa.sholi",
+                "details?id=name.soulayrol.rhaa.sholi");
 
         expectCaseSensitive("sholi/src/main/res/values/strings.xml", "English app branding resources",
                 "<string name=\"app_name\">sholi-dav</string>",
@@ -104,6 +116,15 @@ public final class DocumentationQaTestRunner {
         for (String phrase: requiredPhrases) {
             if (!text.contains(phrase.toLowerCase(Locale.US))) {
                 failures.add(file + " missing '" + phrase + "' for " + description);
+            }
+        }
+    }
+
+    private void reject(String file, String description, String... prohibitedPhrases) throws IOException {
+        String text = readLowercase(file);
+        for (String phrase: prohibitedPhrases) {
+            if (text.contains(phrase.toLowerCase(Locale.US))) {
+                failures.add(file + " contains prohibited '" + phrase + "' for " + description);
             }
         }
     }

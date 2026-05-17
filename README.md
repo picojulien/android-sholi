@@ -25,10 +25,7 @@ WebDAV synchronization is configured from settings with a WebDAV URL, username, 
 
 ## Installation
 
-sholi-dav is free software (see below) and you are welcome to compile and distribute it from [its sources](https://github.com/dsoulayrol/android-sholi). If you prefer binary distributions, you can download it from the following application stores:
-
-* [F-Droid](https://f-droid.org/repository/browse/?fdid=name.soulayrol.rhaa.sholi)
-* [Google Play](https://play.google.com/store/apps/details?id=name.soulayrol.rhaa.sholi)
+sholi-dav is free software (see below) and you are welcome to compile and distribute it from [its sources](https://github.com/picojulien/android-sholi). Fork APKs built from these sources install as `io.github.picojulien.sholidav`, allowing side-by-side installation with original ShoLi.
 
 ## License
 

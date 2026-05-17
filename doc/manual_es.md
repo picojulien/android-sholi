@@ -8,10 +8,7 @@ Este documento pretende ser el manual de usuario de **sholi-dav**. Los usuarios 
 
 ## Instalación
 
-**sholi-dav** es software libre y le invitamos a compilarlo y distribuirlo a partir de [sus fuentes](https://github.com/dsoulayrol/android-Sholi). Si prefiere las distribuciones binarias, puede descargarlo desde las siguientes tiendas de aplicaciones:
-
- * [F-Droid](https://f-droid.org/repository/browse/?fdid=name.soulayrol.rhaa.sholi). Esto es un repositorio dedicado al software libre en dispositivos **Android**. Las aplicaciones son revisadas para detectar malas prácticas, compiladas y firmadas por [ellos](https://f-droid.org/about/).
- * [Google Play](https://play.google.com/store/apps/details?id=name.soulayrol.rhaa.sholi). El repositorio oficial, ofrecido por **Google**. Por defecto sólo las aplicaciones de este repositorio están autorizadas a instalarse en dispositivos **Android**. Por lo tanto, si usted no entiende a que se refiere la línea anterior, sólo tiene que utilizar este enlace.
+**sholi-dav** es software libre y le invitamos a compilarlo y distribuirlo a partir de [sus fuentes](https://github.com/picojulien/android-sholi). Los APK de esta bifurcación se instalan como `io.github.picojulien.sholidav`, lo que permite instalarlos junto al ShoLi original.
 
 Las versiones de **sholi-dav** con sincronización requieren Android 6.0/API 23 o superior para guardar los secretos WebDAV con almacenamiento cifrado. Las versiones antiguas de **Android** deben seguir usando la versión anterior sin sincronización. **sholi-dav** está diseñada para pequeños dispositivos en modo vertical por lo que puede parecer bastante horrible o ser ineficaz en una tableta siendo esto algo normal.
 

@@ -9,7 +9,8 @@
 
 ## Build and Test Commands
 - Story-level regression tests (JDK-only):
-  - `tests/story7/run.sh`
+  - `tests/run-all.sh`
+  - Individual story runners live under `tests/story*/run.sh`; documentation QA lives under `tests/docs/run.sh`.
 - Android/Gradle commands (when environment permits local sockets):
   - `JAVA_HOME=$PWD/env/java11 ANDROID_HOME=$PWD/env/android-sdk GRADLE_USER_HOME=$PWD/.gradle-home GRADLE_OPTS='-Dorg.gradle.native=false' ./env/gradle/bin/gradle :sholi:assembleDebug`
 
@@ -18,8 +19,9 @@
 - greenDAO generated entities/DAOs live under `sholi/src-gen/main/java/.../data/model`.
 - Runtime DB access entry point is `name.soulayrol.rhaa.sholi.data.Operations`.
 - Sync credential access is abstracted behind `CredentialStore` in `name.soulayrol.rhaa.sholi.sync.credentials`.
+- Sync documents, merge/conflict handling, WebDAV transport, settings, and orchestration live under `name.soulayrol.rhaa.sholi.sync.*`.
 - Production credential storage must be wired to AndroidX `EncryptedSharedPreferences` through `EncryptedSharedPreferencesCredentialStore`.
-- Tests should rely on fake/in-memory stores (`InMemoryCredentialStore`) to keep sync logic decoupled from Android storage APIs.
+- Tests should rely on fake/in-memory stores defined in test sources to keep sync logic decoupled from Android storage APIs; do not add plaintext production credential stores.
 
 ## Guidelines for Future AI Agents
 - Follow strict test-first workflow for changes: write failing tests, then minimum implementation, then rerun all tests.

@@ -6,6 +6,7 @@ local.properties
 .epure
 .codex
 .settings
+.project
 build
 env
 tests/*/out/

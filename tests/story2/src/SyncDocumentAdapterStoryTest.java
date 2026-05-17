@@ -11,6 +11,7 @@ import name.soulayrol.rhaa.sholi.sync.document.SyncDocumentItemAdapter;
 import name.soulayrol.rhaa.sholi.sync.document.SyncDocumentJson;
 import name.soulayrol.rhaa.sholi.sync.document.SyncDocumentParseException;
 import name.soulayrol.rhaa.sholi.sync.document.SyncItem;
+import name.soulayrol.rhaa.sholi.sync.items.ItemSyncMetadata;
 import name.soulayrol.rhaa.sholi.sync.items.SyncTrackedItem;
 
 public final class SyncDocumentAdapterStoryTest {
@@ -20,6 +21,8 @@ public final class SyncDocumentAdapterStoryTest {
 
     public static void run() throws Exception {
         verifyAdapterExportsAndAppliesBySyncIdWithoutDuplicates();
+        verifyFullSnapshotApplyDeletesOnlySafeAbsentTombstones();
+        verifyFullSnapshotApplyDeletesExpectedAbsentTombstoneOmittedByCleanup();
         verifyParseAndApplyFailsWithoutLocalDataChanges();
         verifyInvalidRequiredFieldsFailWithoutLocalDataChanges();
         verifySemanticParseFailuresDoNotMutateLocalData();
@@ -65,6 +68,89 @@ public final class SyncDocumentAdapterStoryTest {
         String exported = SyncDocumentJson.serialize(SyncDocumentItemAdapter.toDocument(store.items));
         assertEquals(true, exported.contains("\"sync_id\":\"sync-a\""), "exported existing sync id");
         assertEquals(true, exported.contains("\"deleted\":true"), "exported deleted item");
+    }
+
+    private static void verifyFullSnapshotApplyDeletesOnlySafeAbsentTombstones() {
+        long now = 1000L + ItemSyncMetadata.TOMBSTONE_RETENTION_MILLIS;
+        FakeStore store = new FakeStore();
+        FakeItem live = trackedItem(1L, "sync-live", "Old milk", 1, false, 10L, "phone");
+        FakeItem activeAbsent = trackedItem(2L, "sync-active-absent", "Local eggs", 1, false, 11L, "phone");
+        FakeItem expiredTombstone = trackedItem(
+                3L,
+                "sync-expired-tombstone",
+                "Old bread",
+                1,
+                true,
+                12L,
+                "phone");
+        expiredTombstone.setDeletedSyncedAt(Long.valueOf(1L));
+        FakeItem freshTombstone = trackedItem(
+                4L,
+                "sync-fresh-tombstone",
+                "Old tea",
+                1,
+                true,
+                13L,
+                "phone");
+        freshTombstone.setDeletedSyncedAt(
+                Long.valueOf(now - ItemSyncMetadata.TOMBSTONE_RETENTION_MILLIS + 1L));
+        FakeItem unsyncedTombstone = trackedItem(
+                5L,
+                "sync-unsynced-tombstone",
+                "Old coffee",
+                1,
+                true,
+                14L,
+                "phone");
+        store.add(live);
+        store.add(activeAbsent);
+        store.add(expiredTombstone);
+        store.add(freshTombstone);
+        store.add(unsyncedTombstone);
+
+        SyncDocument incoming = document(syncItem("sync-live", "Remote milk", 2, false, 20L, "tablet"));
+        SyncDocumentItemAdapter.applyFullSnapshotBySyncId(incoming, null, store, now);
+
+        assertEquals(false, store.containsSyncId("sync-expired-tombstone"),
+                "expired synced tombstone absent from snapshot is hard-deleted");
+        assertEquals(true, store.containsSyncId("sync-active-absent"),
+                "active item absent from snapshot is retained");
+        assertEquals(true, store.containsSyncId("sync-fresh-tombstone"),
+                "fresh synced tombstone absent from snapshot is retained");
+        assertEquals(true, store.containsSyncId("sync-unsynced-tombstone"),
+                "unsynced tombstone absent from snapshot is retained");
+        assertEquals(Integer.valueOf(1), Integer.valueOf(store.deleteCount), "safe absent tombstone delete count");
+        assertEquals("Remote milk", store.itemBySyncId("sync-live").getName(), "present item still updates");
+    }
+
+    private static void verifyFullSnapshotApplyDeletesExpectedAbsentTombstoneOmittedByCleanup() {
+        long now = 5000L;
+        FakeStore store = new FakeStore();
+        FakeItem activeAbsent = trackedItem(1L, "sync-active-expected", "Local eggs", 1, false, 10L, "phone");
+        FakeItem recentlySyncedTombstone = trackedItem(
+                2L,
+                "sync-recent-tombstone",
+                "Old bread",
+                1,
+                true,
+                11L,
+                "phone");
+        recentlySyncedTombstone.setDeletedSyncedAt(Long.valueOf(now));
+        store.add(activeAbsent);
+        store.add(recentlySyncedTombstone);
+
+        SyncDocument expected = document(
+                syncItem("sync-active-expected", "Local eggs", 1, false, 10L, "phone"),
+                syncItem("sync-recent-tombstone", "Old bread", 1, true, 11L, "phone"));
+        SyncDocument incoming = document();
+        SyncDocumentItemAdapter.applyFullSnapshotBySyncId(incoming, expected, store, now);
+
+        assertEquals(false, store.containsSyncId("sync-recent-tombstone"),
+                "expected tombstone omitted by cleanup snapshot is hard-deleted");
+        assertEquals(true, store.containsSyncId("sync-active-expected"),
+                "expected active item absent from snapshot is retained");
+        assertEquals(Integer.valueOf(1), Integer.valueOf(store.deleteCount),
+                "cleanup-omitted tombstone delete count");
     }
 
     private static void verifyParseAndApplyFailsWithoutLocalDataChanges() {
@@ -175,12 +261,36 @@ public final class SyncDocumentAdapterStoryTest {
         }
     }
 
+    private static SyncDocument document(SyncItem... items) {
+        ArrayList<SyncItem> list = new ArrayList<SyncItem>();
+        for (SyncItem item: items) {
+            list.add(item);
+        }
+        return new SyncDocument(list);
+    }
+
+    private static SyncItem syncItem(
+            String syncId, String name, int status, boolean deleted, long modifiedAt, String modifiedBy) {
+        return new SyncItem(syncId, name, status, deleted, modifiedAt, new ModifiedBy(modifiedBy, null));
+    }
+
+    private static FakeItem trackedItem(
+            Long id, String syncId, String name, int status, boolean deleted, long modifiedAt, String modifiedBy) {
+        FakeItem item = new FakeItem(id, name, Integer.valueOf(status));
+        item.setSyncId(syncId);
+        item.setDeleted(Boolean.valueOf(deleted));
+        item.setModifiedAt(Long.valueOf(modifiedAt));
+        item.setModifiedByName(modifiedBy);
+        return item;
+    }
+
     private static final class FakeStore implements SyncDocumentItemAdapter.SyncItemStore<FakeItem> {
         private final List<FakeItem> items = new ArrayList<FakeItem>();
         private long nextId = 10L;
         private int transactionCount;
         private int updateCount;
         private int insertCount;
+        private int deleteCount;
 
         private void add(FakeItem item) {
             items.add(item);
@@ -193,6 +303,15 @@ public final class SyncDocumentAdapterStoryTest {
                 }
             }
             throw new AssertionError("Missing item with sync_id " + syncId);
+        }
+
+        private boolean containsSyncId(String syncId) {
+            for (FakeItem item: items) {
+                if (syncId.equals(item.getSyncId())) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         private Map<String, String> snapshot() {
@@ -229,6 +348,12 @@ public final class SyncDocumentAdapterStoryTest {
         @Override
         public void update(FakeItem item) {
             updateCount++;
+        }
+
+        @Override
+        public void delete(FakeItem item) {
+            deleteCount++;
+            items.remove(item);
         }
     }
 

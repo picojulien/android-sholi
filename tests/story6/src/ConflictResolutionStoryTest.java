@@ -195,7 +195,7 @@ public final class ConflictResolutionStoryTest {
         assertEquals(null, reloaded.loadPendingMergedDocument(), "pending merged cleared");
         assertEquals(null, reloaded.loadPendingLocalDocument(), "pending local cleared");
         assertEvents(
-                list("delete-conflicts", "save-pending-merged", "save-pending-local"),
+                list("tx:start", "delete-conflicts", "save-pending-merged", "save-pending-local", "tx:end"),
                 storage.events,
                 "pending conflict state clear order");
     }
@@ -234,9 +234,10 @@ public final class ConflictResolutionStoryTest {
         storage.events.clear();
         store.clearConflicts();
         assertEvents(
-                list("delete-conflicts", "save-pending-merged", "save-pending-local"),
+                list("tx:start", "delete-conflicts", "save-pending-merged", "save-pending-local", "tx:end"),
                 storage.events,
                 "clear conflict operation order");
+        assertEquals(3, storage.transactionCount, "clear conflict transaction callback count");
         assertEquals(0, store.loadConflicts().size(), "clear removes unresolved conflicts");
     }
 

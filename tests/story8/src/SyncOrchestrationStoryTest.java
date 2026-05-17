@@ -41,6 +41,7 @@ public final class SyncOrchestrationStoryTest {
         verifySuccessfulNonConflictingSyncAppliesAndRecordsAfterUpload();
         verifySuccessfulSyncMarksTombstonesSyncedAndRetainsUntilRetentionWindow();
         verifySuccessfulSyncCleansOnlyExpiredSyncedTombstones();
+        verifyPullingRemoteCleanupHardDeletesAbsentLocalTombstone();
         verifyConcurrentLocalEditBeforeMergedUploadPreservesLocalDataAndMetadata();
         verifyConcurrentLocalEditBeforeMergedApplyPreservesLocalDataAndMetadata();
         verifyUploadFailurePreservesLocalDataAndMetadata();
@@ -138,6 +139,34 @@ public final class SyncOrchestrationStoryTest {
                 "fresh tombstone marked included after upload");
         assertEquals(true, containsId(metadata.loadBaselineDocument(), "sync-delete-expired"),
                 "baseline records successfully uploaded expired tombstone");
+    }
+
+    private static void verifyPullingRemoteCleanupHardDeletesAbsentLocalTombstone() {
+        SyncItem live = item("sync-live-pull-clean", "Milk", 1, false, 10L, "base-device");
+        SyncItem tombstone = item("sync-delete-pull-clean", "Bread", 1, true, 20L, "base-device");
+        SyncDocument baseline = document(live, tombstone);
+        SyncDocument remoteCleaned = document(live);
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(200, "\"v2\"", null);
+        transport.respond(200, "\"v2\"", json(remoteCleaned));
+        RecordingLocalStore localStore = new RecordingLocalStore(baseline);
+        localStore.setDeletedSyncedAt("sync-delete-pull-clean", Long.valueOf(1L));
+        RecordingMetadataStore metadata = new RecordingMetadataStore(baseline, "\"v1\"");
+
+        WebDavSyncResult result = controller(transport, localStore, metadata).synchronize(1040L);
+
+        assertEquals(WebDavSyncResult.Status.PULLED_REMOTE, result.getStatus(),
+                "remote tombstone cleanup pull status");
+        assertEquals(list("HEAD", "GET"), transport.methods(),
+                "remote tombstone cleanup request sequence");
+        assertEquals(false, containsId(localStore.currentDocument, "sync-delete-pull-clean"),
+                "absent synced tombstone hard-deleted during guarded apply");
+        assertDocumentEquals(remoteCleaned, localStore.currentDocument,
+                "remote cleanup pull leaves local document equal to incoming snapshot");
+        assertDocumentEquals(remoteCleaned, metadata.loadBaselineDocument(),
+                "remote cleanup pull records cleaned baseline");
+        assertEquals("\"v2\"", metadata.loadRemoteVersionMarker(),
+                "remote cleanup pull records marker");
     }
 
     private static void verifyConcurrentLocalEditBeforeMergedUploadPreservesLocalDataAndMetadata() {
@@ -1015,7 +1044,7 @@ public final class SyncOrchestrationStoryTest {
         @Override
         public void applyDocument(SyncDocument document) {
             appliedDocuments.add(document);
-            currentDocument = document;
+            applyFullSnapshot(document, null, System.currentTimeMillis());
         }
 
         @Override
@@ -1023,8 +1052,57 @@ public final class SyncOrchestrationStoryTest {
             if (!isCurrentDocument(expectedDocument)) {
                 return false;
             }
-            applyDocument(document);
+            appliedDocuments.add(document);
+            applyFullSnapshot(document, expectedDocument, System.currentTimeMillis());
             return true;
+        }
+
+        private void applyFullSnapshot(SyncDocument document, SyncDocument expectedDocument, long now) {
+            LinkedHashMap<String, SyncItem> retainedBySyncId = new LinkedHashMap<String, SyncItem>();
+            LinkedHashMap<String, SyncItem> incomingBySyncId = new LinkedHashMap<String, SyncItem>();
+            for (SyncItem syncItem: document.getItems()) {
+                incomingBySyncId.put(syncItem.getSyncId(), syncItem);
+                deletedSyncedAtBySyncId.remove(syncItem.getSyncId());
+            }
+            for (SyncItem syncItem: document.getItems()) {
+                retainedBySyncId.put(syncItem.getSyncId(), syncItem);
+            }
+            for (SyncItem localItem: currentDocument.getItems()) {
+                if (incomingBySyncId.containsKey(localItem.getSyncId())) {
+                    continue;
+                }
+                if (shouldHardDeleteAbsentTombstone(localItem, expectedDocument, now)) {
+                    deletedSyncedAtBySyncId.remove(localItem.getSyncId());
+                    continue;
+                }
+                retainedBySyncId.put(localItem.getSyncId(), localItem);
+            }
+            currentDocument = new SyncDocument(new ArrayList<SyncItem>(retainedBySyncId.values()));
+        }
+
+        private boolean shouldHardDeleteAbsentTombstone(
+                SyncItem localItem, SyncDocument expectedDocument, long now) {
+            if (!localItem.isDeleted()) {
+                return false;
+            }
+            Long deletedSyncedAt = deletedSyncedAtBySyncId.get(localItem.getSyncId());
+            if (deletedSyncedAt != null
+                    && now - deletedSyncedAt.longValue()
+                    >= name.soulayrol.rhaa.sholi.sync.items.ItemSyncMetadata.TOMBSTONE_RETENTION_MILLIS) {
+                return true;
+            }
+            return deletedSyncedAt != null
+                    && expectedDocument != null
+                    && containsDeletedId(expectedDocument, localItem.getSyncId());
+        }
+
+        private static boolean containsDeletedId(SyncDocument document, String syncId) {
+            for (SyncItem item: document.getItems()) {
+                if (syncId.equals(item.getSyncId()) && item.isDeleted()) {
+                    return true;
+                }
+            }
+            return false;
         }
 
         @Override

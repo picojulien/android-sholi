@@ -2,9 +2,12 @@ package name.soulayrol.rhaa.sholi.sync.document;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
+import name.soulayrol.rhaa.sholi.sync.items.ItemSyncMetadata;
 import name.soulayrol.rhaa.sholi.sync.items.SyncTrackedItem;
 
 public final class SyncDocumentItemAdapter {
@@ -19,6 +22,8 @@ public final class SyncDocumentItemAdapter {
         void insert(T item);
 
         void update(T item);
+
+        void delete(T item);
     }
 
     private SyncDocumentItemAdapter() {
@@ -66,6 +71,32 @@ public final class SyncDocumentItemAdapter {
 
     public static <T extends SyncTrackedItem> void applyBySyncId(
             final SyncDocument document, final SyncItemStore<T> store) {
+        applyBySyncIdInternal(document, null, store, 0L, false);
+    }
+
+    public static <T extends SyncTrackedItem> void applyFullSnapshotBySyncId(
+            final SyncDocument document,
+            final SyncDocument expectedDocument,
+            final SyncItemStore<T> store,
+            final long now) {
+        if (document == null) {
+            throw new IllegalArgumentException("document must not be null");
+        }
+        if (store == null) {
+            throw new IllegalArgumentException("store must not be null");
+        }
+        if (now < 0L) {
+            throw new IllegalArgumentException("now must not be negative");
+        }
+        applyBySyncIdInternal(document, expectedDocument, store, now, true);
+    }
+
+    private static <T extends SyncTrackedItem> void applyBySyncIdInternal(
+            final SyncDocument document,
+            final SyncDocument expectedDocument,
+            final SyncItemStore<T> store,
+            final long now,
+            final boolean cleanupMissingTombstones) {
         if (document == null) {
             throw new IllegalArgumentException("document must not be null");
         }
@@ -75,8 +106,11 @@ public final class SyncDocumentItemAdapter {
         store.runInTransaction(new Runnable() {
             @Override
             public void run() {
+                Map<String, SyncItem> incomingBySyncId = mapBySyncId(document);
+                Set<String> expectedDeletedSyncIds = deletedSyncIds(expectedDocument);
+                List<T> existingItems = store.loadAll();
                 Map<String, T> existingBySyncId = new HashMap<String, T>();
-                for (T item: store.loadAll()) {
+                for (T item: existingItems) {
                     if (item.getSyncId() != null && !existingBySyncId.containsKey(item.getSyncId())) {
                         existingBySyncId.put(item.getSyncId(), item);
                     }
@@ -93,6 +127,14 @@ public final class SyncDocumentItemAdapter {
                         store.update(existing);
                     }
                 }
+                if (cleanupMissingTombstones) {
+                    deleteMissingTombstonesSafeForCleanup(
+                            existingItems,
+                            incomingBySyncId,
+                            expectedDeletedSyncIds,
+                            store,
+                            now);
+                }
             }
         });
     }
@@ -101,6 +143,55 @@ public final class SyncDocumentItemAdapter {
             String json, SyncItemStore<T> store) throws SyncDocumentParseException {
         SyncDocument document = SyncDocumentJson.parse(json);
         applyBySyncId(document, store);
+    }
+
+    private static Map<String, SyncItem> mapBySyncId(SyncDocument document) {
+        HashMap<String, SyncItem> bySyncId = new HashMap<String, SyncItem>();
+        for (SyncItem item: document.getItems()) {
+            bySyncId.put(item.getSyncId(), item);
+        }
+        return bySyncId;
+    }
+
+    private static Set<String> deletedSyncIds(SyncDocument document) {
+        HashSet<String> syncIds = new HashSet<String>();
+        if (document == null) {
+            return syncIds;
+        }
+        for (SyncItem item: document.getItems()) {
+            if (item.isDeleted()) {
+                syncIds.add(item.getSyncId());
+            }
+        }
+        return syncIds;
+    }
+
+    private static <T extends SyncTrackedItem> void deleteMissingTombstonesSafeForCleanup(
+            List<T> existingItems,
+            Map<String, SyncItem> incomingBySyncId,
+            Set<String> expectedDeletedSyncIds,
+            SyncItemStore<T> store,
+            long now) {
+        for (T item: existingItems) {
+            String syncId = item.getSyncId();
+            if (syncId == null || incomingBySyncId.containsKey(syncId)) {
+                continue;
+            }
+            if (shouldHardDeleteMissingTombstone(item, expectedDeletedSyncIds, now)) {
+                store.delete(item);
+            }
+        }
+    }
+
+    private static boolean shouldHardDeleteMissingTombstone(
+            SyncTrackedItem item, Set<String> expectedDeletedSyncIds, long now) {
+        if (!Boolean.TRUE.equals(item.getDeleted())) {
+            return false;
+        }
+        if (ItemSyncMetadata.isTombstoneReadyForCleanup(item, now)) {
+            return true;
+        }
+        return item.getDeletedSyncedAt() != null && expectedDeletedSyncIds.contains(item.getSyncId());
     }
 
     private static String requireString(String value, String field) {

@@ -44,7 +44,7 @@ public final class SqliteLocalSyncDocumentStore implements LocalSyncDocumentStor
 
     @Override
     public void applyDocument(SyncDocument document) {
-        applyDocumentWithStoreTransaction(document, true);
+        applyDocumentWithStoreTransaction(document, null, true);
     }
 
     @Override
@@ -62,7 +62,7 @@ public final class SqliteLocalSyncDocumentStore implements LocalSyncDocumentStor
                 if (!sameDocument(loadCurrentDocumentInOrder(), expectedDocument)) {
                     return;
                 }
-                applyDocumentWithStoreTransaction(document, false);
+                applyDocumentWithStoreTransaction(document, expectedDocument, false);
                 applied[0] = true;
             }
         });
@@ -109,37 +109,48 @@ public final class SqliteLocalSyncDocumentStore implements LocalSyncDocumentStor
         return SyncDocumentItemAdapter.toDocument(items);
     }
 
-    private void applyDocumentWithStoreTransaction(SyncDocument document, final boolean openTransaction) {
-        SyncDocumentItemAdapter.applyBySyncId(document, new SyncDocumentItemAdapter.SyncItemStore<Item>() {
-            @Override
-            public void runInTransaction(Runnable mutation) {
-                if (openTransaction) {
-                    daoSession.runInTx(mutation);
-                } else {
-                    mutation.run();
-                }
-            }
+    private void applyDocumentWithStoreTransaction(
+            SyncDocument document,
+            SyncDocument expectedDocument,
+            final boolean openTransaction) {
+        SyncDocumentItemAdapter.applyFullSnapshotBySyncId(
+                document,
+                expectedDocument,
+                new SyncDocumentItemAdapter.SyncItemStore<Item>() {
+                    @Override
+                    public void runInTransaction(Runnable mutation) {
+                        if (openTransaction) {
+                            daoSession.runInTx(mutation);
+                        } else {
+                            mutation.run();
+                        }
+                    }
 
-            @Override
-            public List<Item> loadAll() {
-                return daoSession.getItemDao().loadAll();
-            }
+                    @Override
+                    public List<Item> loadAll() {
+                        return daoSession.getItemDao().loadAll();
+                    }
 
-            @Override
-            public Item createItem() {
-                return new Item();
-            }
+                    @Override
+                    public Item createItem() {
+                        return new Item();
+                    }
 
-            @Override
-            public void insert(Item item) {
-                daoSession.getItemDao().insert(item);
-            }
+                    @Override
+                    public void insert(Item item) {
+                        daoSession.getItemDao().insert(item);
+                    }
 
-            @Override
-            public void update(Item item) {
-                daoSession.getItemDao().update(item);
-            }
-        });
+                    @Override
+                    public void update(Item item) {
+                        daoSession.getItemDao().update(item);
+                    }
+
+                    @Override
+                    public void delete(Item item) {
+                        daoSession.getItemDao().delete(item);
+                    }
+                }, System.currentTimeMillis());
     }
 
     private static boolean sameDocument(SyncDocument left, SyncDocument right) {

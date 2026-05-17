@@ -128,9 +128,14 @@ public final class SyncMetadataPersistence implements SyncMetadataStore {
 
     @Override
     public void clearConflicts() {
-        storage.deleteAllConflictRecords();
-        storage.savePendingMergedDocumentJson(null);
-        storage.savePendingLocalDocumentJson(null);
+        storage.runInTransaction(new Runnable() {
+            @Override
+            public void run() {
+                storage.deleteAllConflictRecords();
+                storage.savePendingMergedDocumentJson(null);
+                storage.savePendingLocalDocumentJson(null);
+            }
+        });
     }
 
     private static ArrayList<ConflictRecord> encodeConflicts(List<SyncConflict> conflicts) {

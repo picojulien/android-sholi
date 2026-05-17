@@ -13,6 +13,8 @@ final class WebDavSafeText {
             "(?i)(authorization\\s*[:=]\\s*)[^\\r\\n,;}]+(?:\\s+[^\\r\\n,;}]+)?");
     private static final Pattern SENSITIVE_ASSIGNMENT_PATTERN = Pattern.compile(
             "(?i)(access_token|password|passwd|token|secret|credential|auth)=([^\\s&#,;}]+)");
+    private static final Pattern SENSITIVE_FRAGMENT_PATTERN = Pattern.compile(
+            "(?i)(^|[^a-z0-9])(access[_-]?token|refresh[_-]?token|id[_-]?token|token|password|passwd|secret|credential|auth)([^a-z0-9]|$)");
 
     private WebDavSafeText() {
     }
@@ -30,10 +32,10 @@ final class WebDavSafeText {
                     uri.getPort(),
                     uri.getPath(),
                     sanitizeQuery(uri.getQuery()),
-                    uri.getFragment());
+                    sanitizeFragment(uri.getFragment()));
             return redacted.toString();
         } catch (URISyntaxException e) {
-            return sanitizeQueryInRawText(removeRawUserInfo(value));
+            return sanitizeFragmentInRawText(sanitizeQueryInRawText(removeRawUserInfo(value)));
         }
     }
 
@@ -107,6 +109,14 @@ final class WebDavSafeText {
         return prefix + sanitizeQuery(query) + suffix;
     }
 
+    private static String sanitizeFragmentInRawText(String value) {
+        int fragmentStart = value.indexOf('#');
+        if (fragmentStart < 0) {
+            return value;
+        }
+        return value.substring(0, fragmentStart + 1) + sanitizeFragment(value.substring(fragmentStart + 1));
+    }
+
     private static String sanitizeQuery(String query) {
         if (query == null || query.length() == 0) {
             return query;
@@ -127,6 +137,16 @@ final class WebDavSafeText {
             }
         }
         return builder.toString();
+    }
+
+    private static String sanitizeFragment(String fragment) {
+        if (fragment == null || fragment.length() == 0) {
+            return fragment;
+        }
+        if (SENSITIVE_FRAGMENT_PATTERN.matcher(fragment).find()) {
+            return REDACTED;
+        }
+        return fragment;
     }
 
     private static boolean isSensitiveHeader(String name) {

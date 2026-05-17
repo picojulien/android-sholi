@@ -39,6 +39,9 @@ public final class WebDavSyncStoryTest {
         verifyMissingSafeMarkerRequiresConfirmation();
         verifyPullOnlyRecordsBaselineAndFailurePreservesMetadata();
         verifySecretMaterialIsRedactedFromRequestsAndResults();
+        verifyFragmentSecretMaterialIsRedactedFromRequestsResultsAndErrors();
+        verifyDisagreedHeadAndGetEtagsRequireConfirmationBeforeUpload();
+        verifySecondPreconditionFailureStopsAfterSingleRetry();
     }
 
     private static void verifyCreateMissingRemoteUsesIfNoneMatch() {
@@ -293,6 +296,90 @@ public final class WebDavSyncStoryTest {
         assertDoesNotContain(secret, result.getMessage(), "network error message");
         assertDoesNotContain(secret, result.toString(), "network error result string");
         assertDoesNotContain(secret, transport.request(0).toString(), "sent request string");
+    }
+
+    private static void verifyFragmentSecretMaterialIsRedactedFromRequestsResultsAndErrors() {
+        String secret = "fragment-secret";
+        String fragmentUrl = "https://cloud.example.net/sync.json#auth-token/" + secret;
+        WebDavRequest request = new WebDavRequest("GET", fragmentUrl, null, null);
+
+        assertDoesNotContain(secret, request.toString(), "fragment request string");
+
+        WebDavSyncResult syncResult = WebDavSyncResult.status(
+                WebDavSyncResult.Status.SERVER_ERROR,
+                "Remote sync failed at " + fragmentUrl);
+        assertDoesNotContain(secret, syncResult.getMessage(), "fragment sync result message");
+        assertDoesNotContain(secret, syncResult.toString(), "fragment sync result string");
+
+        WebDavMetadataResult metadataResult = WebDavMetadataResult.error(
+                WebDavMetadataResult.Status.SERVER_ERROR,
+                500,
+                "Metadata failed at " + fragmentUrl);
+        assertDoesNotContain(secret, metadataResult.getMessage(), "fragment metadata result message");
+        assertDoesNotContain(secret, metadataResult.toString(), "fragment metadata result string");
+
+        WebDavTransportException exception = new WebDavTransportException(
+                "Transport failed at " + fragmentUrl);
+        assertDoesNotContain(secret, exception.getMessage(), "fragment transport exception message");
+        assertDoesNotContain(secret, exception.toString(), "fragment transport exception string");
+    }
+
+    private static void verifyDisagreedHeadAndGetEtagsRequireConfirmationBeforeUpload() {
+        SyncDocument baseline = document(item("sync-flour", "Flour", 1, false, 10L, "base"));
+        SyncDocument local = document(item("sync-flour", "Whole flour", 1, false, 20L, "phone"));
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(200, "\"v2\"", null);
+        transport.respond(200, "\"v1\"", json(baseline));
+        transport.respond(204, "\"v3\"", null);
+        RecordingMetadataStore metadata = new RecordingMetadataStore(baseline, "\"v1\"");
+        RecordingLocalStore localStore = new RecordingLocalStore(local);
+
+        WebDavSyncResult result = engine(transport, localStore, metadata).synchronize(2000L);
+
+        assertEquals(
+                WebDavSyncResult.Status.CONFIRMATION_REQUIRED,
+                result.getStatus(),
+                "HEAD/GET etag disagreement status");
+        assertEquals(list("HEAD", "GET"), transport.methods(), "HEAD/GET disagreement request sequence");
+        assertEquals(0, transport.countMethod("PUT"), "HEAD/GET disagreement must not blind overwrite");
+        assertDocumentEquals(local, localStore.currentDocument, "HEAD/GET disagreement preserves local document");
+        assertDocumentEquals(baseline, metadata.loadBaselineDocument(), "HEAD/GET disagreement preserves baseline");
+        assertEquals("\"v1\"", metadata.loadRemoteVersionMarker(), "HEAD/GET disagreement preserves marker");
+    }
+
+    private static void verifySecondPreconditionFailureStopsAfterSingleRetry() {
+        SyncItem baseA = item("sync-apples", "Apples", 1, false, 10L, "base");
+        SyncItem baseB = item("sync-butter", "Butter", 1, false, 11L, "base");
+        SyncItem localA = item("sync-apples", "Green apples", 1, false, 20L, "phone");
+        SyncItem remoteB = item("sync-butter", "Butter", 2, false, 30L, "tablet");
+        SyncDocument baseline = document(baseA, baseB);
+        SyncDocument local = document(localA, baseB);
+        SyncDocument remote = document(baseA, remoteB);
+        SyncDocument merged = document(localA, remoteB);
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(200, "\"v1\"", null);
+        transport.respond(412, null, null);
+        transport.respond(200, "\"v2\"", json(remote));
+        transport.respond(412, null, null);
+        RecordingMetadataStore metadata = new RecordingMetadataStore(baseline, "\"v1\"");
+        RecordingLocalStore localStore = new RecordingLocalStore(local);
+
+        WebDavSyncResult result = engine(transport, localStore, metadata).synchronize(2100L);
+
+        assertEquals(
+                WebDavSyncResult.Status.PRECONDITION_FAILED,
+                result.getStatus(),
+                "second precondition failure status");
+        assertEquals(list("HEAD", "PUT", "GET", "PUT"), transport.methods(), "second 412 request sequence");
+        assertEquals(2, transport.countMethod("PUT"), "second 412 performs one retry only");
+        assertEquals("\"v1\"", transport.request(1).getHeader("If-Match"), "second 412 first marker");
+        assertEquals("\"v2\"", transport.request(3).getHeader("If-Match"), "second 412 retry marker");
+        assertEquals(json(merged), transport.request(3).getBody(), "second 412 retry merged body");
+        assertEquals(0, localStore.appliedDocuments.size(), "second 412 must not apply merged document");
+        assertDocumentEquals(local, localStore.currentDocument, "second 412 preserves local document");
+        assertDocumentEquals(baseline, metadata.loadBaselineDocument(), "second 412 preserves baseline");
+        assertEquals("\"v1\"", metadata.loadRemoteVersionMarker(), "second 412 preserves marker");
+        assertEquals(0, metadata.loadConflicts().size(), "second 412 does not persist conflicts");
     }
 
     private static WebDavSyncEngine engine(

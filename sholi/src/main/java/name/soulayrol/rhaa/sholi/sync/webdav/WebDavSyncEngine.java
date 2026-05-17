@@ -358,6 +358,10 @@ public final class WebDavSyncEngine {
 
     private static String chooseSafeUploadMarker(WebDavEtag headEtag, WebDavEtag getEtag) {
         if (getEtag != null && getEtag.isStrong()) {
+            if (headEtag != null && headEtag.isStrong()
+                    && !headEtag.getValue().equals(getEtag.getValue())) {
+                return null;
+            }
             return getEtag.getValue();
         }
         if (headEtag != null && headEtag.isStrong()) {

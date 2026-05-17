@@ -3,12 +3,14 @@ package story3;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
 import name.soulayrol.rhaa.sholi.sync.credentials.CredentialSafeLogger;
+import name.soulayrol.rhaa.sholi.sync.credentials.CredentialSafeText;
 import name.soulayrol.rhaa.sholi.sync.credentials.CredentialStore;
 import name.soulayrol.rhaa.sholi.sync.credentials.SyncCredentialProvider;
 import name.soulayrol.rhaa.sholi.sync.credentials.SyncExportFormatter;
@@ -30,6 +32,7 @@ import name.soulayrol.rhaa.sholi.sync.webdav.WebDavTransportException;
 public final class WebDavSettingsStoryTest {
 
     private static final String SECRET = "story3-super-secret-token";
+    private static final String OPAQUE_SECRET = "opaque-value-12345";
 
     private WebDavSettingsStoryTest() {
     }
@@ -37,12 +40,15 @@ public final class WebDavSettingsStoryTest {
     public static void run() throws Exception {
         verifyNonSecretProfileAndSecretAreStoredSeparately();
         verifyPasswordTokenNeverLeaksIntoSafeText();
+        verifyAndroidManifestAllowsNetworkAccess();
         verifyAndroidSettingsExposeRedactedWebDavPreferences();
+        verifySecretBearingUrlsAreRejectedAndSummariesAreSafe();
         verifyValidEndpointSucceedsWithSafeProbesOnly();
         verifyEndpointFailuresAreClearAndSafe();
         verifyInvalidUrlAndPathFailWithoutRemoteOrMetadataMutation();
         verifyHttpEndpointRequiresExplicitConfirmation();
-        verifyProfileLoaderProvidesConfiguredEndpointAndCredentials();
+        verifyCurrentProfileUsernameWinsOverStoredCredentialUsername();
+        verifyHttpTransportDoesNotFollowRedirectsAutomatically();
     }
 
     private static void verifyNonSecretProfileAndSecretAreStoredSeparately() {
@@ -83,6 +89,9 @@ public final class WebDavSettingsStoryTest {
         assertDoesNotContain(SECRET, SyncExportFormatter.export(profile), "sync profile export");
         assertDoesNotContain(SECRET, CredentialSafeLogger.syncConfigured(profile, credentials), "configured log");
         assertDoesNotContain(SECRET, CredentialSafeLogger.authenticationError(profile, credentials), "auth error");
+        assertDoesNotContain(OPAQUE_SECRET,
+                CredentialSafeText.url("https://cloud.example.net/#authorization=" + OPAQUE_SECRET),
+                "authorization fragment URL");
         assertDoesNotContain(SECRET, credentials.toString(), "credentials string");
     }
 
@@ -104,10 +113,79 @@ public final class WebDavSettingsStoryTest {
         assertContains(fragment, "ProductionCredentialStores.webDav", "encrypted credential store wiring");
         assertContains(fragment, "KEY_WEBDAV_PASSWORD_TOKEN", "password preference handling");
         assertContains(fragment, "settings_webdav_token_summary_redacted", "redacted token summary");
+        assertContains(fragment, "new Thread(new Runnable()", "background WebDAV validation");
+        assertContains(fragment, "runOnUiThread(new Runnable()", "main-thread WebDAV validation result");
+        assertContains(fragment, "CredentialSafeText.message", "sanitized WebDAV result messages");
+        assertContains(fragment, "CredentialSafeText.url", "sanitized WebDAV URL summaries");
         assertDoesNotContain(
                 "setSummary(sharedPreferences.getString(SettingsActivity.KEY_WEBDAV_PASSWORD_TOKEN",
                 fragment,
                 "password summary source");
+    }
+
+    private static void verifyAndroidManifestAllowsNetworkAccess() throws Exception {
+        String manifest = readUtf8("sholi/src/main/AndroidManifest.xml");
+        assertContains(manifest, "android.permission.INTERNET", "network permission");
+    }
+
+    private static void verifySecretBearingUrlsAreRejectedAndSummariesAreSafe() {
+        RecordingKeyValueStore values = new RecordingKeyValueStore();
+        final KeyValueWebDavSyncProfileStore profileStore = new KeyValueWebDavSyncProfileStore(values);
+
+        final WebDavSyncProfile userInfoProfile = profileWithUrl(
+                "https://alice:" + SECRET + "@cloud.example.net/remote.php/dav/files/alice/");
+        assertThrowsIllegalArgument(new ThrowingRunnable() {
+            @Override
+            public void run() {
+                profileStore.save(userInfoProfile);
+            }
+        }, "URL user-info");
+        assertEquals(0, values.values.size(), "user-info URL must not be stored");
+        assertDoesNotContain(SECRET, CredentialSafeText.url(userInfoProfile.getUrl()), "user-info URL summary");
+
+        final WebDavSyncProfile queryProfile = profileWithUrl(
+                "https://cloud.example.net/remote.php/dav/files/alice/?access_token=" + SECRET);
+        assertThrowsIllegalArgument(new ThrowingRunnable() {
+            @Override
+            public void run() {
+                profileStore.save(queryProfile);
+            }
+        }, "sensitive query URL");
+        assertEquals(0, values.values.size(), "sensitive query URL must not be stored");
+        assertDoesNotContain(SECRET, CredentialSafeText.url(queryProfile.getUrl()), "query URL summary");
+
+        final WebDavSyncProfile authorizationQueryProfile = profileWithUrl(
+                "https://cloud.example.net/remote.php/dav/files/alice/?authorization=" + OPAQUE_SECRET);
+        assertThrowsIllegalArgument(new ThrowingRunnable() {
+            @Override
+            public void run() {
+                profileStore.save(authorizationQueryProfile);
+            }
+        }, "authorization query URL");
+        assertEquals(0, values.values.size(), "authorization query URL must not be stored");
+        assertDoesNotContain(OPAQUE_SECRET,
+                CredentialSafeText.url(authorizationQueryProfile.getUrl()),
+                "authorization query URL summary");
+
+        final WebDavSyncProfile fragmentProfile = profileWithUrl(
+                "https://cloud.example.net/remote.php/dav/files/alice/#auth-token=" + SECRET);
+        assertThrowsIllegalArgument(new ThrowingRunnable() {
+            @Override
+            public void run() {
+                profileStore.save(fragmentProfile);
+            }
+        }, "sensitive fragment URL");
+        assertEquals(0, values.values.size(), "sensitive fragment URL must not be stored");
+        assertDoesNotContain(SECRET, CredentialSafeText.url(fragmentProfile.getUrl()), "fragment URL summary");
+
+        values.values.put(KeyValueWebDavSyncProfileStore.KEY_URL, queryProfile.getUrl());
+        values.values.put(KeyValueWebDavSyncProfileStore.KEY_USERNAME, profile().getUsername());
+        values.values.put(KeyValueWebDavSyncProfileStore.KEY_REMOTE_PATH, profile().getRemotePath());
+        values.values.put(KeyValueWebDavSyncProfileStore.KEY_DISPLAY_NAME, profile().getDisplayName());
+        assertEquals(null, profileStore.load(), "unsafe stored URL must not be loaded");
+        assertEquals(null,
+                values.values.get(KeyValueWebDavSyncProfileStore.KEY_URL),
+                "unsafe stored URL must be removed");
     }
 
     private static void verifyValidEndpointSucceedsWithSafeProbesOnly() {
@@ -215,12 +293,12 @@ public final class WebDavSettingsStoryTest {
         assertEquals(WebDavEndpointValidationResult.Status.SUCCESS, confirmed.getStatus(), "confirmed non-HTTPS status");
     }
 
-    private static void verifyProfileLoaderProvidesConfiguredEndpointAndCredentials() {
+    private static void verifyCurrentProfileUsernameWinsOverStoredCredentialUsername() {
         RecordingKeyValueStore values = new RecordingKeyValueStore();
         WebDavSyncProfileStore profileStore = new KeyValueWebDavSyncProfileStore(values);
         RecordingCredentialStore credentialStore = new RecordingCredentialStore();
         profileStore.save(profile());
-        credentialStore.save(credentials());
+        credentialStore.save(new WebDavCredentials("old-alice", SECRET));
 
         WebDavSyncProfileLoader loader = new WebDavSyncProfileLoader(
                 profileStore,
@@ -230,8 +308,27 @@ public final class WebDavSettingsStoryTest {
         assertEquals(profile().getUrl(), endpoint.getProfile().getUrl(), "loaded endpoint URL");
         assertEquals(profile().getRemotePath(), endpoint.getProfile().getRemotePath(), "loaded endpoint path");
         assertEquals(remoteFileUrl(), endpoint.getRemoteFileUrl(), "loaded remote sync URL");
+        assertEquals(profile().getUsername(), endpoint.getCredentials().getUsername(), "loaded endpoint credential username");
         assertEquals(SECRET, endpoint.getCredentials().getPasswordOrToken(), "loaded endpoint credential");
         assertEquals(1, credentialStore.loadCount, "loader uses credential provider");
+
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(207, header("DAV", "1, 2"), "<multistatus />");
+        transport.respond(201, null, "");
+        transport.respond(200, null, WebDavEndpointValidator.PROBE_BODY);
+        transport.respond(204, null, "");
+        WebDavEndpointValidationResult result = new WebDavEndpointValidator(transport)
+                .validate(profile(), new WebDavCredentials("old-alice", SECRET), false);
+        assertEquals(WebDavEndpointValidationResult.Status.SUCCESS, result.getStatus(), "username drift validation status");
+        assertEquals(expectedBasicAuth(profile().getUsername()),
+                transport.request(0).getHeader("Authorization"),
+                "validator credential username");
+    }
+
+    private static void verifyHttpTransportDoesNotFollowRedirectsAutomatically() throws Exception {
+        String transport = readUtf8(
+                "sholi/src/main/java/name/soulayrol/rhaa/sholi/sync/webdav/HttpUrlConnectionWebDavTransport.java");
+        assertContains(transport, "setInstanceFollowRedirects(false)", "redirect safety");
     }
 
     private static void assertFailure(
@@ -257,6 +354,15 @@ public final class WebDavSettingsStoryTest {
                 "sholi/sync.json",
                 "Alice Phone",
                 "client-a");
+    }
+
+    private static WebDavSyncProfile profileWithUrl(String url) {
+        return new WebDavSyncProfile(
+                url,
+                profile().getUsername(),
+                profile().getRemotePath(),
+                profile().getDisplayName(),
+                profile().getClientId());
     }
 
     private static WebDavCredentials credentials() {
@@ -293,6 +399,11 @@ public final class WebDavSettingsStoryTest {
         return list;
     }
 
+    private static String expectedBasicAuth(String username) {
+        return "Basic " + Base64.getEncoder().encodeToString(
+                (username + ":" + SECRET).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+    }
+
     private static void assertContains(String content, String expected, String label) {
         if (content == null || !content.contains(expected)) {
             throw new AssertionError("Expected " + label + " to contain " + expected + ": " + content);
@@ -311,8 +422,22 @@ public final class WebDavSettingsStoryTest {
         }
     }
 
+    private static void assertThrowsIllegalArgument(ThrowingRunnable runnable, String label) {
+        try {
+            runnable.run();
+        } catch (IllegalArgumentException e) {
+            assertDoesNotContain(SECRET, e.getMessage(), label + " exception message");
+            return;
+        }
+        throw new AssertionError("Expected " + label + " to be rejected");
+    }
+
     private static String readUtf8(String path) throws Exception {
         return new String(Files.readAllBytes(Paths.get(path)), "UTF-8");
+    }
+
+    private interface ThrowingRunnable {
+        void run();
     }
 
     private static final class RecordingKeyValueStore implements KeyValueWebDavSyncProfileStore.KeyValueStore {

@@ -59,7 +59,7 @@ public final class WebDavEndpointValidator {
                     "Non-HTTPS WebDAV URLs can expose credentials. Use HTTPS or confirm that you trust this connection.");
         }
 
-        LinkedHashMap<String, String> authHeaders = authorizationHeaders(credentials);
+        LinkedHashMap<String, String> authHeaders = authorizationHeaders(endpoint.getCredentials());
         ProbeResponse parent = request(
                 "PROPFIND",
                 endpoint.getParentCollectionUrl(),

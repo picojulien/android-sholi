@@ -1,7 +1,6 @@
 package name.soulayrol.rhaa.sholi.sync.settings;
 
 import java.net.URI;
-import java.net.URISyntaxException;
 import java.util.Locale;
 
 import name.soulayrol.rhaa.sholi.sync.credentials.WebDavCredentials;
@@ -22,7 +21,7 @@ public final class ConfiguredWebDavEndpoint {
             throw new IllegalArgumentException("credentials must not be null");
         }
         this.profile = profile;
-        this.credentials = credentials;
+        this.credentials = credentialsForProfile(profile, credentials);
         this.remoteFileUrl = buildRemoteFileUrl(profile);
         this.parentCollectionUrl = buildParentCollectionUrl(remoteFileUrl);
     }
@@ -67,20 +66,7 @@ public final class ConfiguredWebDavEndpoint {
     }
 
     public static URI requireHttpUri(String url) {
-        try {
-            URI uri = new URI(url);
-            String scheme = uri.getScheme();
-            if (scheme == null || uri.getHost() == null) {
-                throw new IllegalArgumentException("Enter a valid WebDAV URL");
-            }
-            String normalizedScheme = scheme.toLowerCase(Locale.US);
-            if (!"https".equals(normalizedScheme) && !"http".equals(normalizedScheme)) {
-                throw new IllegalArgumentException("Enter a valid WebDAV URL using HTTP or HTTPS");
-            }
-            return uri;
-        } catch (URISyntaxException e) {
-            throw new IllegalArgumentException("Enter a valid WebDAV URL", e);
-        }
+        return WebDavUrlSecurity.requireHttpUri(url);
     }
 
     public static String normalizeRemotePath(String remotePath) {
@@ -109,5 +95,14 @@ public final class ConfiguredWebDavEndpoint {
             return "client";
         }
         return normalized;
+    }
+
+    private static WebDavCredentials credentialsForProfile(
+            WebDavSyncProfile profile,
+            WebDavCredentials credentials) {
+        if (profile.getUsername().equals(credentials.getUsername())) {
+            return credentials;
+        }
+        return new WebDavCredentials(profile.getUsername(), credentials.getPasswordOrToken());
     }
 }

@@ -23,6 +23,7 @@ public final class HttpUrlConnectionWebDavTransport implements WebDavTransport {
         HttpURLConnection connection = null;
         try {
             connection = (HttpURLConnection) new URL(request.getUrl()).openConnection();
+            connection.setInstanceFollowRedirects(false);
             connection.setConnectTimeout(TIMEOUT_MILLIS);
             connection.setReadTimeout(TIMEOUT_MILLIS);
             setRequestMethod(connection, request.getMethod());

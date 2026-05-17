@@ -14,7 +14,7 @@ public final class CredentialSafeText {
     private static final Pattern SENSITIVE_ASSIGNMENT_PATTERN = Pattern.compile(
             "(?i)(access_token|password|passwd|token|secret|credential|auth)=([^\\s&#,;}]+)");
     private static final Pattern SENSITIVE_FRAGMENT_PATTERN = Pattern.compile(
-            "(?i)(^|[^a-z0-9])(access[_-]?token|refresh[_-]?token|id[_-]?token|token|password|passwd|secret|credential|auth)([^a-z0-9]|$)");
+            "(?i)(^|[^a-z0-9])(access[_-]?token|refresh[_-]?token|id[_-]?token|token|password|passwd|secret|credential|authorization|auth)([^a-z0-9]|$)");
 
     private CredentialSafeText() {
     }
@@ -155,8 +155,7 @@ public final class CredentialSafeText {
                 || normalized.contains("passwd")
                 || normalized.contains("secret")
                 || normalized.contains("credential")
-                || normalized.equals("auth")
-                || normalized.endsWith("_auth");
+                || normalized.contains("auth");
     }
 
     private static int firstIndexOf(String value, int from, char a, char b, char c) {

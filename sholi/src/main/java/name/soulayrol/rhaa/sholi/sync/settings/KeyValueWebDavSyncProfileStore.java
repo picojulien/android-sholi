@@ -26,6 +26,7 @@ public final class KeyValueWebDavSyncProfileStore implements WebDavSyncProfileSt
         if (profile == null) {
             throw new IllegalArgumentException("profile must not be null");
         }
+        WebDavUrlSecurity.requireSafeForStorage(profile.getUrl());
         store.putString(KEY_URL, profile.getUrl());
         store.putString(KEY_USERNAME, profile.getUsername());
         store.putString(KEY_REMOTE_PATH, profile.getRemotePath());
@@ -42,6 +43,14 @@ public final class KeyValueWebDavSyncProfileStore implements WebDavSyncProfileSt
         String remotePath = emptyToNull(store.getString(KEY_REMOTE_PATH, null));
         String displayName = emptyToNull(store.getString(KEY_DISPLAY_NAME, null));
         if (url == null || username == null || remotePath == null || displayName == null) {
+            return null;
+        }
+        try {
+            WebDavUrlSecurity.requireSafeForStorage(url);
+        } catch (IllegalArgumentException e) {
+            store.remove(KEY_URL);
+            store.remove(KEY_LAST_TEST_STATUS);
+            store.remove(KEY_LAST_TEST_MESSAGE);
             return null;
         }
         return new WebDavSyncProfile(

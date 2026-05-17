@@ -9,9 +9,9 @@ The fewer, the better.
 * An edit mode which prevents entering doubles.
 * A simple checking view.
 * A layout locked in portrait mode to ease handling when you have a can of peas in the other hand.
-* No special permission requirement at all.
+* Offline-first list handling; the network permission is used only for optional WebDAV synchronization.
 
-However, useful features are also present for power users, like gestures or database export and import. The complete application documentation is provided [in this document](doc/manual.md).
+However, useful features are also present for power users, like gestures, database export and import, and WebDAV synchronization. The complete application documentation is provided [in this document](doc/manual.md).
 
 See also the [CHANGES](CHANGES) file for a list of prominent updates with each version.
 
@@ -19,7 +19,9 @@ See also the [CHANGES](CHANGES) file for a list of prominent updates with each v
 
 Because this application is aimed at being available when doing shopping, it is designed for small devices. It thus provides no optimisation for tablet screens for example.
 
-Also, for the sake of simplicity, ShoLi is written for Android 4.0+. Part of writing this software was the pleasure to discover the latest programmable interfaces, and I did not want to bother with the android compatibility library or external tools like ActionBarSherlock. Feel free to port it onto Android 2.2 or 2.3 if you really want to.
+Sync-capable ShoLi builds are written for Android 6.0/API 23 or newer. This minimum version allows WebDAV passwords or app-specific tokens to be stored through encrypted Android credential storage. Older Android releases should stay on the previous non-sync build.
+
+WebDAV synchronization is configured from settings with a WebDAV URL, username, password or app-specific token, remote file path, and device/user display name. The app recommends app-specific tokens, stores the secret encrypted, warns before non-HTTPS endpoints, and avoids blind overwrites by using ETags or safe conflict handling.
 
 ## Installation
 

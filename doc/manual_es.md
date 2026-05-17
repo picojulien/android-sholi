@@ -13,7 +13,7 @@ Este documento pretende ser el manual de usuario de **ShoLi**. Los usuarios que 
  * [F-Droid](https://f-droid.org/repository/browse/?fdid=name.soulayrol.rhaa.sholi). Esto es un repositorio dedicado al software libre en dispositivos **Android**. Las aplicaciones son revisadas para detectar malas prácticas, compiladas y firmadas por [ellos](https://f-droid.org/about/).
  * [Google Play](https://play.google.com/store/apps/details?id=name.soulayrol.rhaa.sholi). El repositorio oficial, ofrecido por **Google**. Por defecto sólo las aplicaciones de este repositorio están autorizadas a instalarse en dispositivos **Android**. Por lo tanto, si usted no entiende a que se refiere la línea anterior, sólo tiene que utilizar este enlace.
 
-**ShoLi** está escrita para **Android** 4.0 o superior. Está diseñado para pequeños dispositivos en modo vertical por lo que puede parecer bastante horrible o ser ineficaz en una tableta siendo esto algo normal.
+Las versiones de **ShoLi** con sincronización requieren Android 6.0/API 23 o superior para guardar los secretos WebDAV con almacenamiento cifrado. Las versiones antiguas de **Android** deben seguir usando la versión anterior sin sincronización. **ShoLi** está diseñada para pequeños dispositivos en modo vertical por lo que puede parecer bastante horrible o ser ineficaz en una tableta siendo esto algo normal.
 
 ## Uso
 
@@ -74,6 +74,14 @@ Un conjunto de artículos exportados es un archivo de texto. Cada línea es el n
   * `+`: El elemento está en la lista y marcado.
 
 Cuando se importan datos sólo las líneas con este formato son analizados, por lo que cualquier tipo de comentarios se pueden añadir en el medio.
+
+### Sincronización WebDAV
+
+**ShoLi** puede sincronizar la lista mediante un servidor WebDAV. La sincronización es manual: use la entrada *Sync* del menú principal. En los ajustes se configuran la URL WebDAV, el usuario, la contraseña o token específico de la aplicación, la ruta remota del archivo JSON, y el nombre visible del dispositivo o usuario.
+
+La contraseña o token se guarda cifrada mediante el almacenamiento seguro de Android; no hay alternativa en texto plano y se recomienda usar un token específico de la aplicación. La acción *Probar conexión* valida el servidor, las credenciales, la ruta remota y los permisos sin cambiar la lista. Si la URL usa HTTP no HTTPS, **ShoLi** muestra una advertencia antes de continuar.
+
+Una sincronización correcta puede crear o actualizar el documento remoto, descargar cambios remotos o indicar que no hay cambios. Un error muestra un estado general de configuración, autenticación, red, servidor o documento remoto inválido. Si hay conflicto, **ShoLi** muestra los valores local y remoto, campos cambiados, marcas de tiempo, estado, borrado y modificador; el usuario elige la versión local o remota. Con ETag y escrituras condicionales, **ShoLi** evita sobrescrituras ciegas; si no puede comprobar el estado remoto de forma segura, se detiene en lugar de reemplazar datos sin elección del usuario.
 
 ## Licencia
 

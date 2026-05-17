@@ -13,7 +13,7 @@ This document pretends to be the user manual of **ShoLi**. Users in a hurry may 
  * [F-Droid](https://f-droid.org/repository/browse/?fdid=name.soulayrol.rhaa.sholi). This is a repository dedicated to free software on **Android** devices. Applications are checked against bad practice, compiled and signed by [them](https://f-droid.org/about/).
  * [Google Play](https://play.google.com/store/apps/details?id=name.soulayrol.rhaa.sholi). The official repository, hosted by **Google**. By default, only applications from this repository are authorised to install on **Android** devices. So, if you don't understand what the previous line are about, simply use this link.
 
-**ShoLi** is written for **Android** 4.0+. It is designed for small devices in portrait mode, so it may look quite terrible or not efficient at all on a pad, and that is normal.
+Sync-capable **ShoLi** builds require Android 6.0/API 23 or newer so WebDAV secrets can use encrypted Android credential storage. Older **Android** versions should keep using the previous non-sync build. **ShoLi** is designed for small devices in portrait mode, so it may look quite terrible or not efficient at all on a pad, and that is normal.
 
 ## Usage
 
@@ -76,6 +76,32 @@ By default, markers are defined as follow:
  * `+`: the item is listed, and checked.
 
 These markers can be redefined at will in settings. They can be anything and are not limited to a single character. However, they cannot be empty or only spaces, and they cannot overlap (they all must be different from each other).
+
+### WebDAV synchronization
+
+**ShoLi** can synchronize the list through a WebDAV server. Synchronization is manual and offline-first: the database on the device remains the source of truth until you choose the *Sync* entry from the main menu. A sync run may create or update the remote document, pull remote changes, report that everything is already up to date, fail with a configuration/network/server error, or stop with conflicts that need your choice.
+
+#### Settings and connection test
+
+Open the settings and fill the WebDAV synchronization section:
+
+* *WebDAV URL*: the WebDAV collection URL. HTTPS is recommended.
+* *WebDAV username*: the account name used for WebDAV authentication.
+* *Password or app-specific token*: the secret used for WebDAV authentication. It is stored encrypted with AndroidX Security and Android Keystore support; no plaintext fallback is provided. Prefer an app-specific token over your main account password when your WebDAV provider supports it.
+* *Remote file path*: a relative path to the ShoLi sync JSON file, for example `sholi/sync.json`.
+* *Device/user display name*: the name written as the modifier for changes made on this device.
+
+The *Test connection* action checks the configured endpoint without modifying list data. It validates the URL, credentials, remote path, parent collection, and read/write access with a temporary probe file. If the URL is non-HTTPS, **ShoLi** warns that credentials may be exposed and asks for confirmation before testing anyway.
+
+#### Sync results and conflicts
+
+Use the *Sync* action in the main menu to start manual synchronization. Successful results report that the remote sync document was created or updated, that remote changes were pulled, or that no sync changes were detected. Failure results report the high-level reason, such as incomplete configuration, authentication failure, network/server error, invalid remote document, local changes during synchronization, or a required confirmation before replacing remote data.
+
+When local and remote changes touch different items or fields, **ShoLi** merges them automatically. When the same item changed differently on both sides, synchronization stops and shows a conflict dialog. The dialog shows the local and remote values, changed fields, timestamps, status, deletion state, and modifier name for the item. Choose *Use local* or *Use remote* for the whole item. If more conflicts remain, **ShoLi** shows the next one. After all conflicts are resolved, tap *Sync* again to upload the resolved document.
+
+#### Remote safety
+
+The remote sync file is a complete JSON snapshot with stable item identities, statuses, deletion tombstones, modification timestamps, and modifier names. **ShoLi** uses WebDAV ETag checks for conditional create and update operations, so it avoids blind overwrites when another device changed the remote file. If usable ETags are missing or inconsistent, **ShoLi** downloads the remote document and compares it with the last successful sync baseline; conflicts require user choice, and unsafe replacement stops instead of silently overwriting remote data.
 
 ## License
 

@@ -1,5 +1,11 @@
 Version 1.6.0
-  + Sync-capable builds now require Android 6.0/API 23 or newer for secure WebDAV credential storage.
+  + Added WebDAV synchronization using a canonical JSON sync document and ETag-safe uploads.
+  + Added WebDAV settings for URL, username, password or app token, remote file path, and device/user display name.
+  + Added manual synchronization from the main menu, with success, failure, and conflict feedback.
+  + Added conflict resolution showing local and remote item values, changed fields, timestamps, status, deletion state, and modifier names before choosing local or remote.
+  * WebDAV passwords and app tokens are stored encrypted with AndroidX Security; app-specific tokens are recommended and no plaintext fallback is provided.
+  * Test connection validates the WebDAV endpoint without changing list data and warns before using non-HTTPS URLs.
+  * Sync-capable builds now require Android 6.0/API 23 or newer for secure WebDAV credential storage.
 
 Version 1.5.0
   + Serialized data format is now customizable (fixes #21)

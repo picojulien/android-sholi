@@ -71,11 +71,13 @@
     <string name="settings_webdav_token_title">Password or app-specific token</string>
     <string name="settings_webdav_token_summary_redacted">Stored encrypted. App-specific tokens are recommended; the value is not shown.</string>
     <string name="settings_webdav_remote_path_title">Remote file path</string>
+    <string name="settings_webdav_remote_path_summary">Relative path to the sync JSON file.</string>
     <string name="settings_webdav_display_name_title">Device/user display name</string>
     <string name="settings_webdav_test_connection_title">Test connection</string>
     <string name="settings_webdav_test_connection_summary">Validate the configured WebDAV endpoint without changing list data.</string>
     <string name="settings_webdav_non_https_warning">Non-HTTPS WebDAV URLs can expose credentials. Use HTTPS unless you explicitly trust this connection.</string>
     <string name="settings_webdav_url_rejected_secret">Remove usernames, passwords, tokens, auth parameters, and secrets from the WebDAV URL.</string>
+    <string name="settings_webdav_remote_path_rejected_secret">Use a relative file path only; remove URLs, queries, fragments, auth parameters, and secrets.</string>
     <string name="settings_webdav_non_https_confirm_title">Use non-HTTPS WebDAV URL?</string>
     <string name="settings_webdav_non_https_confirm_action">Test anyway</string>
     <string name="settings_webdav_incomplete">Complete WebDAV URL, username, remote path, display name, and token before testing.</string>

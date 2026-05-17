@@ -6,6 +6,8 @@ public interface WebDavSyncProfileStore {
 
     void save(WebDavSyncProfile profile);
 
+    void saveTestResult(String status, String message);
+
     WebDavSyncProfile load();
 
     void clear();

@@ -14,7 +14,7 @@ final class WebDavSafeText {
     private static final Pattern SENSITIVE_ASSIGNMENT_PATTERN = Pattern.compile(
             "(?i)(access_token|password|passwd|token|secret|credential|auth)=([^\\s&#,;}]+)");
     private static final Pattern SENSITIVE_FRAGMENT_PATTERN = Pattern.compile(
-            "(?i)(^|[^a-z0-9])(access[_-]?token|refresh[_-]?token|id[_-]?token|token|password|passwd|secret|credential|auth)([^a-z0-9]|$)");
+            "(?i)(^|[^a-z0-9])(access[_-]?token|refresh[_-]?token|id[_-]?token|token|password|passwd|secret|credential|authorization|auth)([^a-z0-9]|$)");
 
     private WebDavSafeText() {
     }
@@ -25,6 +25,9 @@ final class WebDavSafeText {
         }
         try {
             URI uri = new URI(value);
+            if (uri.isOpaque()) {
+                return sanitizeFragmentInRawText(sanitizeQueryInRawText(removeRawUserInfo(value)));
+            }
             URI redacted = new URI(
                     uri.getScheme(),
                     null,
@@ -84,7 +87,7 @@ final class WebDavSafeText {
     private static String removeRawUserInfo(String value) {
         int scheme = value.indexOf("://");
         if (scheme < 0) {
-            return value;
+            return removeUserInfoLike(value, 0);
         }
         int authorityStart = scheme + 3;
         int authorityEnd = firstIndexOf(value, authorityStart, '/', '?', '#');
@@ -93,6 +96,19 @@ final class WebDavSafeText {
             return value;
         }
         return value.substring(0, authorityStart) + REDACTED + value.substring(userInfoEnd);
+    }
+
+    private static String removeUserInfoLike(String value, int from) {
+        int authorityEnd = firstIndexOf(value, from, '/', '?', '#');
+        int userInfoEnd = value.indexOf('@', from);
+        if (userInfoEnd < 0 || userInfoEnd > authorityEnd) {
+            return value;
+        }
+        int passwordStart = value.lastIndexOf(':', userInfoEnd);
+        if (passwordStart < from) {
+            return value.substring(0, from) + REDACTED + value.substring(userInfoEnd);
+        }
+        return value.substring(0, passwordStart + 1) + REDACTED + value.substring(userInfoEnd);
     }
 
     private static String sanitizeQueryInRawText(String value) {
@@ -169,8 +185,7 @@ final class WebDavSafeText {
                 || normalized.contains("passwd")
                 || normalized.contains("secret")
                 || normalized.contains("credential")
-                || normalized.equals("auth")
-                || normalized.endsWith("_auth");
+                || normalized.contains("auth");
     }
 
     private static int firstIndexOf(String value, int from, char a, char b, char c) {

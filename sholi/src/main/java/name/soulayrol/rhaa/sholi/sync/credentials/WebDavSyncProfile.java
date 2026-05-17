@@ -95,7 +95,7 @@ public final class WebDavSyncProfile {
     public String toString() {
         return "WebDavSyncProfile{url='" + CredentialSafeText.url(url) + '\''
                 + ", username='" + username + '\''
-                + ", remotePath='" + remotePath + '\''
+                + ", remotePath='" + CredentialSafeText.path(remotePath) + '\''
                 + ", displayName='" + displayName + '\''
                 + ", clientId='" + clientId + '\''
                 + ", lastTestStatus='" + lastTestStatus + '\''

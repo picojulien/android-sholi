@@ -40,6 +40,7 @@ public final class WebDavSyncStoryTest {
         verifyPullOnlyRecordsBaselineAndFailurePreservesMetadata();
         verifySecretMaterialIsRedactedFromRequestsAndResults();
         verifyFragmentSecretMaterialIsRedactedFromRequestsResultsAndErrors();
+        verifyAuthorizationAndBroadAuthMaterialIsRedacted();
         verifyDisagreedHeadAndGetEtagsRequireConfirmationBeforeUpload();
         verifySecondPreconditionFailureStopsAfterSingleRetry();
     }
@@ -322,6 +323,30 @@ public final class WebDavSyncStoryTest {
                 "Transport failed at " + fragmentUrl);
         assertDoesNotContain(secret, exception.getMessage(), "fragment transport exception message");
         assertDoesNotContain(secret, exception.toString(), "fragment transport exception string");
+    }
+
+    private static void verifyAuthorizationAndBroadAuthMaterialIsRedacted() {
+        String secret = "authorization-secret";
+        WebDavRequest authorizationQuery = new WebDavRequest(
+                "GET",
+                "https://cloud.example.net/sync.json?authorization=" + secret,
+                null,
+                null);
+        assertDoesNotContain(secret, authorizationQuery.toString(), "authorization query request string");
+
+        WebDavRequest broadAuthQuery = new WebDavRequest(
+                "GET",
+                "https://cloud.example.net/sync.json?oauth=" + secret,
+                null,
+                null);
+        assertDoesNotContain(secret, broadAuthQuery.toString(), "broad auth query request string");
+
+        WebDavRequest authorizationFragment = new WebDavRequest(
+                "GET",
+                "https://cloud.example.net/sync.json#authorization=" + secret,
+                null,
+                null);
+        assertDoesNotContain(secret, authorizationFragment.toString(), "authorization fragment request string");
     }
 
     private static void verifyDisagreedHeadAndGetEtagsRequireConfirmationBeforeUpload() {

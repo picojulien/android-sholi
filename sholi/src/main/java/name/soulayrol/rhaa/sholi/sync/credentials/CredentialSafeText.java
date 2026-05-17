@@ -25,6 +25,9 @@ public final class CredentialSafeText {
         }
         try {
             URI uri = new URI(value);
+            if (uri.isOpaque()) {
+                return sanitizeFragmentInRawText(sanitizeQueryInRawText(removeRawUserInfo(value)));
+            }
             URI redacted = new URI(
                     uri.getScheme(),
                     null,
@@ -47,6 +50,10 @@ public final class CredentialSafeText {
         result = redactAuthorization(result);
         result = redactSensitiveAssignments(result);
         return result;
+    }
+
+    public static String path(String value) {
+        return message(value);
     }
 
     public static String redactCredential(String value, WebDavCredentials credentials) {
@@ -81,7 +88,7 @@ public final class CredentialSafeText {
     private static String removeRawUserInfo(String value) {
         int scheme = value.indexOf("://");
         if (scheme < 0) {
-            return value;
+            return removeUserInfoLike(value, 0);
         }
         int authorityStart = scheme + 3;
         int authorityEnd = firstIndexOf(value, authorityStart, '/', '?', '#');
@@ -92,6 +99,19 @@ public final class CredentialSafeText {
         return value.substring(0, authorityStart)
                 + REDACTED
                 + value.substring(userInfoEnd);
+    }
+
+    private static String removeUserInfoLike(String value, int from) {
+        int authorityEnd = firstIndexOf(value, from, '/', '?', '#');
+        int userInfoEnd = value.indexOf('@', from);
+        if (userInfoEnd < 0 || userInfoEnd > authorityEnd) {
+            return value;
+        }
+        int passwordStart = value.lastIndexOf(':', userInfoEnd);
+        if (passwordStart < from) {
+            return value.substring(0, from) + REDACTED + value.substring(userInfoEnd);
+        }
+        return value.substring(0, passwordStart + 1) + REDACTED + value.substring(userInfoEnd);
     }
 
     private static String sanitizeQueryInRawText(String value) {

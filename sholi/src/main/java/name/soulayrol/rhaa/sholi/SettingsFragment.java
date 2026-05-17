@@ -40,6 +40,7 @@ import name.soulayrol.rhaa.sholi.sync.credentials.WebDavSyncProfile;
 import name.soulayrol.rhaa.sholi.sync.settings.KeyValueWebDavSyncProfileStore;
 import name.soulayrol.rhaa.sholi.sync.settings.WebDavEndpointValidationResult;
 import name.soulayrol.rhaa.sholi.sync.settings.WebDavEndpointValidator;
+import name.soulayrol.rhaa.sholi.sync.settings.WebDavRemotePathSecurity;
 import name.soulayrol.rhaa.sholi.sync.settings.WebDavSyncProfileStore;
 import name.soulayrol.rhaa.sholi.sync.settings.WebDavUrlSecurity;
 import name.soulayrol.rhaa.sholi.sync.webdav.HttpUrlConnectionWebDavTransport;
@@ -69,6 +70,12 @@ public class SettingsFragment extends PreferenceFragment
                 new Preference.OnPreferenceChangeListener() {
                     public boolean onPreferenceChange(Preference preference, Object value) {
                         return validateWebDavUrl((String) value);
+                    }
+                });
+        findPreference(SettingsActivity.KEY_WEBDAV_REMOTE_PATH).setOnPreferenceChangeListener(
+                new Preference.OnPreferenceChangeListener() {
+                    public boolean onPreferenceChange(Preference preference, Object value) {
+                        return validateWebDavRemotePath((String) value);
                     }
                 });
         findPreference(SettingsActivity.KEY_WEBDAV_PASSWORD_TOKEN).setOnPreferenceChangeListener(
@@ -170,6 +177,22 @@ public class SettingsFragment extends PreferenceFragment
                     getActivity(),
                     getResources().getString(R.string.settings_webdav_non_https_warning),
                     Toast.LENGTH_LONG).show();
+        }
+        return true;
+    }
+
+    private boolean validateWebDavRemotePath(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return true;
+        }
+        try {
+            WebDavRemotePathSecurity.requireSafeForStorage(value);
+        } catch (IllegalArgumentException e) {
+            Toast.makeText(
+                    getActivity(),
+                    getResources().getString(R.string.settings_webdav_remote_path_rejected_secret),
+                    Toast.LENGTH_LONG).show();
+            return false;
         }
         return true;
     }
@@ -284,8 +307,17 @@ public class SettingsFragment extends PreferenceFragment
         }
 
         String safeMessage = CredentialSafeText.message(result.getMessage());
-        profileStore(sharedPreferences).save(
-                profile.withTestStatus(result.getStatus().name(), safeMessage));
+        WebDavSyncProfileStore store = profileStore(sharedPreferences);
+        WebDavSyncProfile currentProfile;
+        try {
+            currentProfile = store.load();
+        } catch (RuntimeException e) {
+            return;
+        }
+        if (currentProfile == null || !sameTestedWebDavProfile(profile, currentProfile)) {
+            return;
+        }
+        store.saveTestResult(result.getStatus().name(), safeMessage);
         updatePreferenceSummary(sharedPreferences, SettingsActivity.KEY_WEBDAV_TEST_CONNECTION);
         Toast.makeText(getActivity(), safeMessage, Toast.LENGTH_LONG).show();
     }
@@ -318,10 +350,12 @@ public class SettingsFragment extends PreferenceFragment
             Preference p = findPreference(key);
             p.setSummary(safeWebDavUrlSummary(sharedPreferences));
         } else if (SettingsActivity.KEY_WEBDAV_USERNAME.equals(key)
-                || SettingsActivity.KEY_WEBDAV_REMOTE_PATH.equals(key)
                 || SettingsActivity.KEY_WEBDAV_DISPLAY_NAME.equals(key)) {
             Preference p = findPreference(key);
             p.setSummary(sharedPreferences.getString(key, ""));
+        } else if (SettingsActivity.KEY_WEBDAV_REMOTE_PATH.equals(key)) {
+            Preference p = findPreference(key);
+            p.setSummary(safeWebDavRemotePathSummary(sharedPreferences));
         } else if (SettingsActivity.KEY_WEBDAV_PASSWORD_TOKEN.equals(key)) {
             Preference p = findPreference(key);
             p.setSummary(getResources().getString(R.string.settings_webdav_token_summary_redacted));
@@ -350,6 +384,35 @@ public class SettingsFragment extends PreferenceFragment
             return getResources().getString(R.string.settings_webdav_url_summary);
         }
         return CredentialSafeText.url(url);
+    }
+
+    private String safeWebDavRemotePathSummary(SharedPreferences sharedPreferences) {
+        String remotePath = sharedPreferences.getString(SettingsActivity.KEY_WEBDAV_REMOTE_PATH, "");
+        if (remotePath == null || remotePath.trim().isEmpty()) {
+            return "";
+        }
+        try {
+            return WebDavRemotePathSecurity.requireSafeForStorage(remotePath);
+        } catch (IllegalArgumentException e) {
+            sharedPreferences.edit()
+                    .remove(SettingsActivity.KEY_WEBDAV_REMOTE_PATH)
+                    .remove(SettingsActivity.KEY_WEBDAV_LAST_TEST_STATUS)
+                    .remove(SettingsActivity.KEY_WEBDAV_LAST_TEST_MESSAGE)
+                    .apply();
+            return getResources().getString(R.string.settings_webdav_remote_path_summary);
+        }
+    }
+
+    private boolean sameTestedWebDavProfile(WebDavSyncProfile tested, WebDavSyncProfile current) {
+        return tested.getUrl().equals(current.getUrl())
+                && tested.getUsername().equals(current.getUsername())
+                && tested.getRemotePath().equals(current.getRemotePath())
+                && tested.getDisplayName().equals(current.getDisplayName())
+                && equalsNullable(tested.getClientId(), current.getClientId());
+    }
+
+    private boolean equalsNullable(String left, String right) {
+        return left == null ? right == null : left.equals(right);
     }
 
     private WebDavSyncProfileStore profileStore(SharedPreferences sharedPreferences) {

@@ -70,23 +70,7 @@ public final class ConfiguredWebDavEndpoint {
     }
 
     public static String normalizeRemotePath(String remotePath) {
-        if (remotePath == null || remotePath.trim().isEmpty()) {
-            throw new IllegalArgumentException("Enter a remote file path");
-        }
-        String path = remotePath.trim().replace('\\', '/');
-        while (path.startsWith("/")) {
-            path = path.substring(1);
-        }
-        if (path.length() == 0 || path.endsWith("/") || path.contains("://")) {
-            throw new IllegalArgumentException("Enter a remote file path for the sync JSON file");
-        }
-        String[] parts = path.split("/");
-        for (String part: parts) {
-            if (part.length() == 0 || ".".equals(part) || "..".equals(part)) {
-                throw new IllegalArgumentException("Enter a remote file path without . or .. segments");
-            }
-        }
-        return path;
+        return WebDavRemotePathSecurity.requireSafeForStorage(remotePath);
     }
 
     private static String safeProbeToken(String clientId) {

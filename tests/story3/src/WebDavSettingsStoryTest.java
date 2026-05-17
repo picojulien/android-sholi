@@ -21,6 +21,7 @@ import name.soulayrol.rhaa.sholi.sync.settings.ConfiguredWebDavEndpoint;
 import name.soulayrol.rhaa.sholi.sync.settings.KeyValueWebDavSyncProfileStore;
 import name.soulayrol.rhaa.sholi.sync.settings.WebDavEndpointValidationResult;
 import name.soulayrol.rhaa.sholi.sync.settings.WebDavEndpointValidator;
+import name.soulayrol.rhaa.sholi.sync.settings.WebDavRemotePathSecurity;
 import name.soulayrol.rhaa.sholi.sync.settings.WebDavSyncProfileLoader;
 import name.soulayrol.rhaa.sholi.sync.settings.WebDavSyncProfileStore;
 import name.soulayrol.rhaa.sholi.sync.settings.WebDavSyncSettingsRepository;
@@ -43,6 +44,8 @@ public final class WebDavSettingsStoryTest {
         verifyAndroidManifestAllowsNetworkAccess();
         verifyAndroidSettingsExposeRedactedWebDavPreferences();
         verifySecretBearingUrlsAreRejectedAndSummariesAreSafe();
+        verifyUnsafeRemotePathsAreRejectedPurgedAndNeverDisplayed();
+        verifyAsyncConnectionTestDoesNotOverwriteChangedSettings();
         verifyValidEndpointSucceedsWithSafeProbesOnly();
         verifyEndpointFailuresAreClearAndSafe();
         verifyInvalidUrlAndPathFailWithoutRemoteOrMetadataMutation();
@@ -117,6 +120,15 @@ public final class WebDavSettingsStoryTest {
         assertContains(fragment, "runOnUiThread(new Runnable()", "main-thread WebDAV validation result");
         assertContains(fragment, "CredentialSafeText.message", "sanitized WebDAV result messages");
         assertContains(fragment, "CredentialSafeText.url", "sanitized WebDAV URL summaries");
+        assertContains(fragment, "validateWebDavRemotePath", "remote path change validation");
+        assertContains(fragment, "safeWebDavRemotePathSummary", "sanitized WebDAV remote path summaries");
+        assertContains(fragment,
+                "findPreference(SettingsActivity.KEY_WEBDAV_REMOTE_PATH).setOnPreferenceChangeListener",
+                "remote path preference validation hook");
+        assertDoesNotContain(
+                "|| SettingsActivity.KEY_WEBDAV_REMOTE_PATH.equals(key)",
+                fragment,
+                "raw remote path summary branch");
         assertDoesNotContain(
                 "setSummary(sharedPreferences.getString(SettingsActivity.KEY_WEBDAV_PASSWORD_TOKEN",
                 fragment,
@@ -186,6 +198,102 @@ public final class WebDavSettingsStoryTest {
         assertEquals(null,
                 values.values.get(KeyValueWebDavSyncProfileStore.KEY_URL),
                 "unsafe stored URL must be removed");
+    }
+
+    private static void verifyUnsafeRemotePathsAreRejectedPurgedAndNeverDisplayed() {
+        RecordingKeyValueStore values = new RecordingKeyValueStore();
+        final KeyValueWebDavSyncProfileStore profileStore = new KeyValueWebDavSyncProfileStore(values);
+        String[] unsafePaths = new String[] {
+                "sholi/sync.json?access_token=" + SECRET,
+                "sholi/sync.json#auth-token=" + SECRET,
+                "https://alice:" + SECRET + "@cloud.example.net/sholi/sync.json",
+                "alice:" + SECRET + "@cloud.example.net/sholi/sync.json",
+                "sholi/sync.json;authorization=" + SECRET,
+                "sholi/sync.json&token=" + SECRET,
+                "sholi/sync.json=secret"
+        };
+
+        for (int i = 0; i < unsafePaths.length; i++) {
+            final WebDavSyncProfile unsafeProfile = profileWithRemotePath(unsafePaths[i]);
+            assertThrowsIllegalArgument(new ThrowingRunnable() {
+                @Override
+                public void run() {
+                    profileStore.save(unsafeProfile);
+                }
+            }, "unsafe remote path " + i);
+            assertEquals(0, values.values.size(), "unsafe remote path must not be stored " + i);
+            assertDoesNotContain(SECRET,
+                    CredentialSafeText.message(unsafeProfile.getRemotePath()),
+                    "remote path display " + i);
+            assertDoesNotContain(SECRET,
+                    SyncJsonSerializer.serialize(unsafeProfile),
+                    "remote path sync JSON " + i);
+            assertDoesNotContain(SECRET,
+                    SyncExportFormatter.export(unsafeProfile),
+                    "remote path settings export " + i);
+            assertDoesNotContain(SECRET, unsafeProfile.toString(), "remote path profile string " + i);
+        }
+
+        values.values.put(KeyValueWebDavSyncProfileStore.KEY_URL, profile().getUrl());
+        values.values.put(KeyValueWebDavSyncProfileStore.KEY_USERNAME, profile().getUsername());
+        values.values.put(KeyValueWebDavSyncProfileStore.KEY_REMOTE_PATH,
+                "sholi/sync.json?access_token=" + SECRET);
+        values.values.put(KeyValueWebDavSyncProfileStore.KEY_DISPLAY_NAME, profile().getDisplayName());
+        values.values.put(KeyValueWebDavSyncProfileStore.KEY_LAST_TEST_STATUS, "SUCCESS");
+        values.values.put(KeyValueWebDavSyncProfileStore.KEY_LAST_TEST_MESSAGE,
+                "tested sync.json?access_token=" + SECRET);
+
+        assertEquals(null, profileStore.load(), "unsafe stored remote path must not be loaded");
+        assertEquals(null,
+                values.values.get(KeyValueWebDavSyncProfileStore.KEY_REMOTE_PATH),
+                "unsafe stored remote path must be removed");
+        assertEquals(null,
+                values.values.get(KeyValueWebDavSyncProfileStore.KEY_LAST_TEST_STATUS),
+                "stale test status must be removed with unsafe path");
+        assertEquals(null,
+                values.values.get(KeyValueWebDavSyncProfileStore.KEY_LAST_TEST_MESSAGE),
+                "stale test message must be removed with unsafe path");
+
+        values.values.clear();
+        values.values.put(KeyValueWebDavSyncProfileStore.KEY_URL, profile().getUrl());
+        values.values.put(KeyValueWebDavSyncProfileStore.KEY_USERNAME, profile().getUsername());
+        values.values.put(KeyValueWebDavSyncProfileStore.KEY_REMOTE_PATH, "/sholi\\sync.json");
+        values.values.put(KeyValueWebDavSyncProfileStore.KEY_DISPLAY_NAME, profile().getDisplayName());
+        WebDavSyncProfile normalized = profileStore.load();
+        assertEquals("sholi/sync.json", normalized.getRemotePath(), "normalized loaded remote path");
+        assertEquals("sholi/sync.json",
+                values.values.get(KeyValueWebDavSyncProfileStore.KEY_REMOTE_PATH),
+                "normalized stored remote path");
+        assertEquals("sholi/sync.json",
+                WebDavRemotePathSecurity.requireSafeForStorage("/sholi\\sync.json"),
+                "remote path safety helper normalization");
+    }
+
+    private static void verifyAsyncConnectionTestDoesNotOverwriteChangedSettings() throws Exception {
+        String fragment = readUtf8("sholi/src/main/java/name/soulayrol/rhaa/sholi/SettingsFragment.java");
+        assertContains(fragment, "saveTestResult", "test result status-only persistence");
+        assertContains(fragment, "sameTestedWebDavProfile", "stale WebDAV test result guard");
+        assertContains(fragment, "currentProfile = store.load()",
+                "reload current profile before storing test result");
+        assertDoesNotContain("profile.withTestStatus", fragment, "captured profile test status save");
+
+        RecordingKeyValueStore values = new RecordingKeyValueStore();
+        KeyValueWebDavSyncProfileStore profileStore = new KeyValueWebDavSyncProfileStore(values);
+        WebDavSyncProfile updatedProfile = profileWithRemotePath("new/sync.json");
+        profileStore.save(updatedProfile);
+
+        profileStore.saveTestResult("SUCCESS", "WebDAV connection test succeeded");
+
+        assertEquals(updatedProfile.getUrl(), values.values.get(KeyValueWebDavSyncProfileStore.KEY_URL),
+                "status save keeps current URL");
+        assertEquals(updatedProfile.getRemotePath(),
+                values.values.get(KeyValueWebDavSyncProfileStore.KEY_REMOTE_PATH),
+                "status save keeps current remote path");
+        assertEquals("SUCCESS", values.values.get(KeyValueWebDavSyncProfileStore.KEY_LAST_TEST_STATUS),
+                "status save records status");
+        assertEquals("WebDAV connection test succeeded",
+                values.values.get(KeyValueWebDavSyncProfileStore.KEY_LAST_TEST_MESSAGE),
+                "status save records message");
     }
 
     private static void verifyValidEndpointSucceedsWithSafeProbesOnly() {
@@ -361,6 +469,15 @@ public final class WebDavSettingsStoryTest {
                 url,
                 profile().getUsername(),
                 profile().getRemotePath(),
+                profile().getDisplayName(),
+                profile().getClientId());
+    }
+
+    private static WebDavSyncProfile profileWithRemotePath(String remotePath) {
+        return new WebDavSyncProfile(
+                profile().getUrl(),
+                profile().getUsername(),
+                remotePath,
                 profile().getDisplayName(),
                 profile().getClientId());
     }

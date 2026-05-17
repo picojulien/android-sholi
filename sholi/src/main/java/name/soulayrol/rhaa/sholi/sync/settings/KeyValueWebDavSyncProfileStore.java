@@ -1,5 +1,6 @@
 package name.soulayrol.rhaa.sholi.sync.settings;
 
+import name.soulayrol.rhaa.sholi.sync.credentials.CredentialSafeText;
 import name.soulayrol.rhaa.sholi.sync.credentials.WebDavSyncProfile;
 
 public final class KeyValueWebDavSyncProfileStore implements WebDavSyncProfileStore {
@@ -27,13 +28,19 @@ public final class KeyValueWebDavSyncProfileStore implements WebDavSyncProfileSt
             throw new IllegalArgumentException("profile must not be null");
         }
         WebDavUrlSecurity.requireSafeForStorage(profile.getUrl());
+        String remotePath = WebDavRemotePathSecurity.requireSafeForStorage(profile.getRemotePath());
         store.putString(KEY_URL, profile.getUrl());
         store.putString(KEY_USERNAME, profile.getUsername());
-        store.putString(KEY_REMOTE_PATH, profile.getRemotePath());
+        store.putString(KEY_REMOTE_PATH, remotePath);
         store.putString(KEY_DISPLAY_NAME, profile.getDisplayName());
         putOptional(KEY_CLIENT_ID, profile.getClientId());
-        putOptional(KEY_LAST_TEST_STATUS, profile.getLastTestStatus());
-        putOptional(KEY_LAST_TEST_MESSAGE, profile.getLastTestMessage());
+        saveTestResult(profile.getLastTestStatus(), profile.getLastTestMessage());
+    }
+
+    @Override
+    public void saveTestResult(String status, String message) {
+        putOptional(KEY_LAST_TEST_STATUS, status);
+        putOptional(KEY_LAST_TEST_MESSAGE, CredentialSafeText.message(message));
     }
 
     @Override
@@ -52,6 +59,17 @@ public final class KeyValueWebDavSyncProfileStore implements WebDavSyncProfileSt
             store.remove(KEY_LAST_TEST_STATUS);
             store.remove(KEY_LAST_TEST_MESSAGE);
             return null;
+        }
+        try {
+            remotePath = WebDavRemotePathSecurity.requireSafeForStorage(remotePath);
+        } catch (IllegalArgumentException e) {
+            store.remove(KEY_REMOTE_PATH);
+            store.remove(KEY_LAST_TEST_STATUS);
+            store.remove(KEY_LAST_TEST_MESSAGE);
+            return null;
+        }
+        if (!remotePath.equals(emptyToNull(store.getString(KEY_REMOTE_PATH, null)))) {
+            store.putString(KEY_REMOTE_PATH, remotePath);
         }
         return new WebDavSyncProfile(
                 url,

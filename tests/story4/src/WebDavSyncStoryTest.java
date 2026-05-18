@@ -36,6 +36,9 @@ public final class WebDavSyncStoryTest {
         verifyPreconditionFailureDownloadsAndRetriesAfterNonConflictingMerge();
         verifyPreconditionFailureStopsOnConflicts();
         verifyWeakAndMissingEtagsUseBaselineCompareAndNeverBlindOverwrite();
+        verifyFreshEmptyLocalPullsUnsafeMarkerRemoteWithoutUpload();
+        verifyFreshEmptyUnsafeMarkerPullHonorsLocalStaleGuard();
+        verifyNonEmptyLocalUnsafeMarkerRequiresConfirmation();
         verifyMissingSafeMarkerRequiresConfirmation();
         verifyPullOnlyRecordsBaselineAndFailurePreservesMetadata();
         verifySecretMaterialIsRedactedFromRequestsAndResults();
@@ -207,6 +210,61 @@ public final class WebDavSyncStoryTest {
         assertDocumentEquals(remoteChanged, missingLocalStore.currentDocument, "missing etag applies remote pull");
         assertDocumentEquals(remoteChanged, missingMetadata.loadBaselineDocument(), "missing etag records pull baseline");
         assertEquals(null, missingMetadata.loadRemoteVersionMarker(), "missing etag stores no unsafe marker");
+    }
+
+    private static void verifyFreshEmptyLocalPullsUnsafeMarkerRemoteWithoutUpload() {
+        assertFreshEmptyUnsafeMarkerPullsRemote(
+                "missing etag",
+                null,
+                null,
+                null);
+        assertFreshEmptyUnsafeMarkerPullsRemote(
+                "weak etag",
+                "W/\"weak-remote\"",
+                "W/\"weak-remote\"",
+                "W/\"weak-remote\"");
+        assertFreshEmptyUnsafeMarkerPullsRemote(
+                "HEAD/GET etag disagreement",
+                "\"head-v2\"",
+                "\"get-v1\"",
+                "\"get-v1\"");
+    }
+
+    private static void verifyFreshEmptyUnsafeMarkerPullHonorsLocalStaleGuard() {
+        SyncDocument emptyLocal = document();
+        SyncDocument remote = document(item("sync-remote", "Remote tea", 1, false, 20L, "tablet"));
+        SyncDocument staleLocal = document(item("sync-local", "Local tea", 1, false, 30L, "phone"));
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(200, null, null);
+        transport.respond(200, null, json(remote));
+        RecordingMetadataStore metadata = new RecordingMetadataStore(null, null);
+        RecordingLocalStore localStore = new RecordingLocalStore(emptyLocal);
+        localStore.changeCurrentOnNextApply(staleLocal);
+
+        WebDavSyncResult result = engine(transport, localStore, metadata).synchronize(1650L);
+
+        assertEquals(WebDavSyncResult.Status.LOCAL_CHANGED, result.getStatus(), "fresh pull stale status");
+        assertEquals(list("HEAD", "GET"), transport.methods(), "fresh pull stale request sequence");
+        assertEquals(0, transport.countMethod("PUT"), "fresh pull stale must not upload");
+        assertEquals(0, localStore.appliedDocuments.size(), "fresh pull stale must not apply remote");
+        assertDocumentEquals(staleLocal, localStore.currentDocument, "fresh pull stale preserves changed local");
+        assertEquals(null, metadata.loadBaselineDocument(), "fresh pull stale preserves absent baseline");
+        assertEquals(null, metadata.loadRemoteVersionMarker(), "fresh pull stale preserves absent marker");
+    }
+
+    private static void verifyNonEmptyLocalUnsafeMarkerRequiresConfirmation() {
+        assertNonEmptyLocalUnsafeMarkerRequiresConfirmation(
+                "missing etag",
+                null,
+                null);
+        assertNonEmptyLocalUnsafeMarkerRequiresConfirmation(
+                "weak etag",
+                "W/\"weak-local\"",
+                "W/\"weak-local\"");
+        assertNonEmptyLocalUnsafeMarkerRequiresConfirmation(
+                "HEAD/GET etag disagreement",
+                "\"head-local\"",
+                "\"get-local\"");
     }
 
     private static void verifyMissingSafeMarkerRequiresConfirmation() {
@@ -407,6 +465,54 @@ public final class WebDavSyncStoryTest {
         assertEquals(0, metadata.loadConflicts().size(), "second 412 does not persist conflicts");
     }
 
+    private static void assertFreshEmptyUnsafeMarkerPullsRemote(
+            String label,
+            String headEtag,
+            String getEtag,
+            String expectedStoredMarker) {
+        SyncDocument emptyLocal = document();
+        SyncDocument remote = document(item("sync-" + label, "Remote " + label, 1, false, 20L, "tablet"));
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(200, headEtag, null);
+        transport.respond(200, getEtag, json(remote));
+        RecordingMetadataStore metadata = new RecordingMetadataStore(null, null);
+        RecordingLocalStore localStore = new RecordingLocalStore(emptyLocal);
+
+        WebDavSyncResult result = engine(transport, localStore, metadata).synchronize(1600L);
+
+        assertEquals(WebDavSyncResult.Status.PULLED_REMOTE, result.getStatus(), label + " fresh pull status");
+        assertEquals(list("HEAD", "GET"), transport.methods(), label + " fresh pull request sequence");
+        assertEquals(0, transport.countMethod("PUT"), label + " fresh pull must not upload");
+        assertDocumentEquals(remote, localStore.currentDocument, label + " fresh pull applies remote");
+        assertDocumentEquals(remote, metadata.loadBaselineDocument(), label + " fresh pull records baseline");
+        assertEquals(expectedStoredMarker, metadata.loadRemoteVersionMarker(), label + " fresh pull records marker");
+    }
+
+    private static void assertNonEmptyLocalUnsafeMarkerRequiresConfirmation(
+            String label,
+            String headEtag,
+            String getEtag) {
+        SyncDocument local = document(item("sync-local-" + label, "Local " + label, 1, false, 10L, "phone"));
+        SyncDocument remote = document(item("sync-remote-" + label, "Remote " + label, 1, false, 20L, "tablet"));
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(200, headEtag, null);
+        transport.respond(200, getEtag, json(remote));
+        RecordingMetadataStore metadata = new RecordingMetadataStore(null, null);
+        RecordingLocalStore localStore = new RecordingLocalStore(local);
+
+        WebDavSyncResult result = engine(transport, localStore, metadata).synchronize(1700L);
+
+        assertEquals(
+                WebDavSyncResult.Status.CONFIRMATION_REQUIRED,
+                result.getStatus(),
+                label + " non-empty confirmation status");
+        assertEquals(list("HEAD", "GET"), transport.methods(), label + " non-empty request sequence");
+        assertEquals(0, transport.countMethod("PUT"), label + " non-empty must not upload");
+        assertDocumentEquals(local, localStore.currentDocument, label + " non-empty preserves local");
+        assertEquals(null, metadata.loadBaselineDocument(), label + " non-empty preserves absent baseline");
+        assertEquals(null, metadata.loadRemoteVersionMarker(), label + " non-empty preserves absent marker");
+    }
+
     private static WebDavSyncEngine engine(
             RecordingTransport transport,
             RecordingLocalStore localStore,
@@ -514,6 +620,7 @@ public final class WebDavSyncStoryTest {
     private static final class RecordingLocalStore implements LocalSyncDocumentStore {
         private SyncDocument currentDocument;
         private final List<SyncDocument> appliedDocuments = new ArrayList<SyncDocument>();
+        private SyncDocument changeBeforeApplyDocument;
 
         RecordingLocalStore(SyncDocument currentDocument) {
             this.currentDocument = currentDocument;
@@ -537,6 +644,10 @@ public final class WebDavSyncStoryTest {
 
         @Override
         public boolean applyDocumentIfCurrent(SyncDocument expectedDocument, SyncDocument document) {
+            if (changeBeforeApplyDocument != null) {
+                currentDocument = changeBeforeApplyDocument;
+                changeBeforeApplyDocument = null;
+            }
             if (!isCurrentDocument(expectedDocument)) {
                 return false;
             }
@@ -547,6 +658,10 @@ public final class WebDavSyncStoryTest {
         @Override
         public boolean markDeletedSyncedAndCleanupIfCurrent(SyncDocument expectedDocument, long now) {
             return isCurrentDocument(expectedDocument);
+        }
+
+        void changeCurrentOnNextApply(SyncDocument document) {
+            changeBeforeApplyDocument = document;
         }
     }
 

@@ -234,6 +234,13 @@ public final class WebDavSyncEngine {
                         WebDavSyncResult.Status.UP_TO_DATE,
                         "Remote sync document already matches local document");
             }
+            if (isEmptyDocument(localDocument)) {
+                return recordPullOnly(
+                        snapshot.document,
+                        markerFrom(snapshot.etag),
+                        true,
+                        localDocument);
+            }
             return confirmationRequired();
         }
 
@@ -492,6 +499,10 @@ public final class WebDavSyncEngine {
             return left == right;
         }
         return SyncDocumentJson.serialize(left).equals(SyncDocumentJson.serialize(right));
+    }
+
+    private static boolean isEmptyDocument(SyncDocument document) {
+        return document != null && document.getItems().isEmpty();
     }
 
     private static String markerFrom(WebDavEtag etag) {

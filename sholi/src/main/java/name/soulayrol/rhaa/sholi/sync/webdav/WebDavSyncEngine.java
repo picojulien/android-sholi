@@ -241,6 +241,33 @@ public final class WebDavSyncEngine {
                         true,
                         localDocument);
             }
+            SyncMergeResult initialMerge = SyncMerger.merge(
+                    null,
+                    localDocument,
+                    snapshot.document,
+                    markerFrom(snapshot.etag),
+                    conflictTimestamp);
+            if (initialMerge.hasConflicts()) {
+                WebDavSyncResult staleLocalResult = validateLocalUnchanged(localDocument);
+                if (staleLocalResult != null) {
+                    return staleLocalResult;
+                }
+                SyncStateRecorder.persistConflicts(
+                        metadataStore,
+                        initialMerge.getConflicts(),
+                        initialMerge.getPendingMergedDocument(),
+                        localDocument);
+                return WebDavSyncResult.conflicts(initialMerge.getConflicts());
+            }
+
+            SyncDocument initialMergedDocument = initialMerge.getMergedDocument();
+            if (sameDocument(initialMergedDocument, snapshot.document)) {
+                return recordPullOnly(
+                        initialMergedDocument,
+                        markerFrom(snapshot.etag),
+                        !sameDocument(localDocument, initialMergedDocument),
+                        localDocument);
+            }
             return confirmationRequired();
         }
 

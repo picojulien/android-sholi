@@ -53,6 +53,7 @@ public final class SyncOrchestrationStoryTest {
         verifyRemainingUnresolvedConflictBlocksResumeUpload();
         verifyAllResolvedConflictsProduceAndUploadResolvedDocument();
         verifyResolvedConflictsPreservePendingNonConflictingRemoteChanges();
+        verifyInitialUnsafeConflictsPreservePendingRemoteOnlyItemsOnResume();
         verifyLocalEditToPendingNonConflictBeforeResumeBlocksStaleUpload();
         verifyLocalEditAfterConflictCaptureBeforeResumeDoesNotUploadStaleResolution();
         verifyLocalEditDuringResolvedConflictUploadDoesNotApplyOrRecordStaleResolution();
@@ -571,6 +572,58 @@ public final class SyncOrchestrationStoryTest {
         assertEquals("\"v3\"", metadata.loadRemoteVersionMarker(),
                 "mixed resolved records new marker");
         assertEquals(0, metadata.loadConflicts().size(), "mixed resolved clears conflicts");
+    }
+
+    private static void verifyInitialUnsafeConflictsPreservePendingRemoteOnlyItemsOnResume() {
+        SyncItem localA = item("sync-initial-a", "Oat milk", 1, false, 20L, "phone");
+        SyncItem remoteA = item("sync-initial-a", "Soy milk", 1, false, 30L, "tablet");
+        SyncItem localOnly = item("sync-initial-local", "Crackers", 1, false, 25L, "phone");
+        SyncItem remoteOnly = item("sync-initial-remote", "Bread", 2, false, 40L, "tablet");
+        SyncDocument local = document(localA, localOnly);
+        SyncDocument remote = document(remoteA, remoteOnly);
+        SyncDocument expectedResolved = document(localOnly, remoteOnly, localA);
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(200, "\"head-v2\"", null);
+        transport.respond(200, "\"get-v1\"", json(remote));
+        RecordingLocalStore localStore = new RecordingLocalStore(local);
+        RecordingMetadataStore metadata = new RecordingMetadataStore(null, null);
+
+        WebDavSyncResult conflictResult = controller(transport, localStore, metadata).synchronize(1340L);
+        RecordingConflictUploader uploader = new RecordingConflictUploader("\"v3\"");
+        ResolvedConflictSyncService service = new ResolvedConflictSyncService(localStore, metadata, uploader);
+
+        assertEquals(WebDavSyncResult.Status.CONFLICTS, conflictResult.getStatus(),
+                "initial unsafe conflict capture status");
+        assertEquals(list("HEAD", "GET"), transport.methods(),
+                "initial unsafe conflict capture request sequence");
+        assertEquals(0, transport.countMethod("PUT"), "initial unsafe conflict capture does not upload");
+        assertDocumentEquals(document(localOnly, remoteOnly), metadata.loadPendingMergedDocument(),
+                "initial unsafe conflict pending merged keeps remote-only item");
+        assertDocumentEquals(local, metadata.loadPendingLocalDocument(),
+                "initial unsafe conflict records expected local document");
+
+        service.choose("sync-initial-a", ConflictChoice.LOCAL);
+        ResolvedConflictSyncService.UploadPlan plan = service.prepareUpload();
+        WebDavSyncResult result = service.resumeResolvedConflicts();
+
+        assertEquals(ResolvedConflictSyncService.UploadPlan.Status.READY, plan.getStatus(),
+                "initial unsafe resolved upload readiness");
+        assertEquals("\"get-v1\"", plan.getRemoteVersionMarker(),
+                "initial unsafe resolved upload marker from downloaded snapshot");
+        assertItemEquals(remoteOnly, byId(plan.getDocument(), "sync-initial-remote"),
+                "initial unsafe resolved preserves pending remote-only item");
+        assertEquals(WebDavSyncResult.Status.UPDATED_REMOTE, result.getStatus(),
+                "initial unsafe resolved upload status");
+        assertEquals(1, uploader.uploads.size(), "initial unsafe resolved performs upload");
+        assertDocumentEquals(expectedResolved, uploader.uploads.get(0).document,
+                "initial unsafe resolved upload body preserves pending remote-only item");
+        assertDocumentEquals(expectedResolved, localStore.currentDocument,
+                "initial unsafe resolved local apply preserves pending remote-only item");
+        assertDocumentEquals(expectedResolved, metadata.loadBaselineDocument(),
+                "initial unsafe resolved baseline preserves pending remote-only item");
+        assertEquals("\"v3\"", metadata.loadRemoteVersionMarker(),
+                "initial unsafe resolved records new marker");
+        assertEquals(0, metadata.loadConflicts().size(), "initial unsafe resolved clears conflicts");
     }
 
     private static void verifyLocalEditToPendingNonConflictBeforeResumeBlocksStaleUpload() {

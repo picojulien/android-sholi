@@ -38,8 +38,9 @@ public final class WebDavSyncStoryTest {
         verifyWeakAndMissingEtagsUseBaselineCompareAndNeverBlindOverwrite();
         verifyFreshEmptyLocalPullsUnsafeMarkerRemoteWithoutUpload();
         verifyFreshEmptyUnsafeMarkerPullHonorsLocalStaleGuard();
-        verifyNonEmptyLocalUnsafeMarkerRequiresConfirmation();
-        verifyMissingSafeMarkerRequiresConfirmation();
+        verifyNonEmptyInitialUnsafeMarkerConflictsArePersistedWithoutUpload();
+        verifyNonEmptyInitialUnsafeConflictHonorsLocalStaleGuardBeforePersisting();
+        verifyInitialUnsafeMarkerIndependentLocalOnlyItemRequiresConfirmationWithoutUpload();
         verifyPullOnlyRecordsBaselineAndFailurePreservesMetadata();
         verifySecretMaterialIsRedactedFromRequestsAndResults();
         verifyFragmentSecretMaterialIsRedactedFromRequestsResultsAndErrors();
@@ -252,41 +253,109 @@ public final class WebDavSyncStoryTest {
         assertEquals(null, metadata.loadRemoteVersionMarker(), "fresh pull stale preserves absent marker");
     }
 
-    private static void verifyNonEmptyLocalUnsafeMarkerRequiresConfirmation() {
-        assertNonEmptyLocalUnsafeMarkerRequiresConfirmation(
+    private static void verifyNonEmptyInitialUnsafeMarkerConflictsArePersistedWithoutUpload() {
+        assertNonEmptyInitialUnsafeMarkerConflictPersists(
+                "missing etag",
+                null,
+                null,
+                null);
+        assertNonEmptyInitialUnsafeMarkerConflictPersists(
+                "weak etag",
+                "W/\"weak-conflict\"",
+                "W/\"weak-conflict\"",
+                "W/\"weak-conflict\"");
+        assertNonEmptyInitialUnsafeMarkerConflictPersists(
+                "HEAD/GET etag disagreement",
+                "\"head-conflict\"",
+                "\"get-conflict\"",
+                "\"get-conflict\"");
+    }
+
+    private static void verifyInitialUnsafeMarkerIndependentLocalOnlyItemRequiresConfirmationWithoutUpload() {
+        assertInitialUnsafeMarkerIndependentLocalOnlyRequiresConfirmation(
                 "missing etag",
                 null,
                 null);
-        assertNonEmptyLocalUnsafeMarkerRequiresConfirmation(
+        assertInitialUnsafeMarkerIndependentLocalOnlyRequiresConfirmation(
                 "weak etag",
                 "W/\"weak-local\"",
                 "W/\"weak-local\"");
-        assertNonEmptyLocalUnsafeMarkerRequiresConfirmation(
+        assertInitialUnsafeMarkerIndependentLocalOnlyRequiresConfirmation(
                 "HEAD/GET etag disagreement",
                 "\"head-local\"",
                 "\"get-local\"");
     }
 
-    private static void verifyMissingSafeMarkerRequiresConfirmation() {
-        SyncDocument local = document(item("sync-coffee", "Coffee", 1, false, 10L, "phone"));
-        SyncDocument remote = document(item("sync-coffee", "Decaf coffee", 1, false, 20L, "tablet"));
+    private static void assertNonEmptyInitialUnsafeMarkerConflictPersists(
+            String label,
+            String headEtag,
+            String getEtag,
+            String expectedConflictMarker) {
+        SyncItem localItem = item("sync-initial-conflict", "Local " + label, 1, false, 10L, "phone");
+        SyncItem remoteItem = item("sync-initial-conflict", "Remote " + label, 1, false, 20L, "tablet");
+        SyncDocument local = document(localItem);
+        SyncDocument remote = document(remoteItem);
         RecordingTransport transport = new RecordingTransport();
-        transport.respond(200, null, null);
-        transport.respond(200, null, json(remote));
+        transport.respond(200, headEtag, null);
+        transport.respond(200, getEtag, json(remote));
         RecordingMetadataStore metadata = new RecordingMetadataStore(null, null);
         RecordingLocalStore localStore = new RecordingLocalStore(local);
 
         WebDavSyncResult result = engine(transport, localStore, metadata).synchronize(1700L);
 
         assertEquals(
-                WebDavSyncResult.Status.CONFIRMATION_REQUIRED,
+                WebDavSyncResult.Status.CONFLICTS,
                 result.getStatus(),
-                "missing safe marker confirmation status");
-        assertEquals(list("HEAD", "GET"), transport.methods(), "missing marker request sequence");
-        assertEquals(0, transport.countMethod("PUT"), "missing marker must not replace remote");
-        assertEquals(null, metadata.loadBaselineDocument(), "missing marker preserves absent baseline");
-        assertEquals(null, metadata.loadRemoteVersionMarker(), "missing marker preserves absent marker");
-        assertDocumentEquals(local, localStore.currentDocument, "missing marker preserves local document");
+                label + " initial unsafe conflict status");
+        assertEquals(list("HEAD", "GET"), transport.methods(), label + " initial unsafe conflict request sequence");
+        assertEquals(0, transport.countMethod("PUT"), label + " initial unsafe conflict must not upload");
+        assertEquals(1, metadata.loadConflicts().size(), label + " initial unsafe conflict persisted");
+        SyncConflict conflict = metadata.loadConflicts().get(0);
+        assertEquals("sync-initial-conflict", conflict.getSyncId(), label + " initial conflict sync_id");
+        assertEquals(null, conflict.getBaselineItem(), label + " initial conflict has no baseline item");
+        assertEquals(localItem.getName(), conflict.getLocalItem().getName(), label + " initial conflict local item");
+        assertEquals(remoteItem.getName(), conflict.getRemoteItem().getName(), label + " initial conflict remote item");
+        assertEquals(expectedConflictMarker, conflict.getRemoteVersionMarker(), label + " initial conflict marker");
+        assertEquals(true, conflict.getConflictingFields().contains("name"), label + " initial conflict field");
+        assertDocumentEquals(document(), metadata.loadPendingMergedDocument(),
+                label + " initial conflict pending merged non-conflicts");
+        assertDocumentEquals(local, metadata.loadPendingLocalDocument(),
+                label + " initial conflict expected local document");
+        assertEquals(null, metadata.loadBaselineDocument(), label + " initial conflict preserves absent baseline");
+        assertEquals(null, metadata.loadRemoteVersionMarker(), label + " initial conflict preserves absent marker");
+        assertDocumentEquals(local, localStore.currentDocument, label + " initial conflict preserves local document");
+    }
+
+    private static void verifyNonEmptyInitialUnsafeConflictHonorsLocalStaleGuardBeforePersisting() {
+        SyncDocument local = document(item("sync-initial-stale", "Local tea", 1, false, 10L, "phone"));
+        SyncDocument remote = document(item("sync-initial-stale", "Remote tea", 1, false, 20L, "tablet"));
+        SyncDocument staleLocal = document(item("sync-initial-stale", "Changed tea", 1, false, 30L, "phone"));
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(200, null, null);
+        transport.respond(200, null, json(remote));
+        RecordingMetadataStore metadata = new RecordingMetadataStore(null, null);
+        RecordingLocalStore localStore = new RecordingLocalStore(local);
+        localStore.changeCurrentOnNextValidation(staleLocal);
+
+        WebDavSyncResult result = engine(transport, localStore, metadata).synchronize(1750L);
+
+        assertEquals(WebDavSyncResult.Status.LOCAL_CHANGED, result.getStatus(),
+                "initial unsafe conflict stale local status");
+        assertEquals(list("HEAD", "GET"), transport.methods(),
+                "initial unsafe conflict stale request sequence");
+        assertEquals(0, transport.countMethod("PUT"), "initial unsafe conflict stale must not upload");
+        assertEquals(0, metadata.loadConflicts().size(),
+                "initial unsafe conflict stale must not persist conflicts");
+        assertEquals(null, metadata.loadPendingMergedDocument(),
+                "initial unsafe conflict stale preserves absent pending merge");
+        assertEquals(null, metadata.loadPendingLocalDocument(),
+                "initial unsafe conflict stale preserves absent pending local");
+        assertEquals(null, metadata.loadBaselineDocument(),
+                "initial unsafe conflict stale preserves absent baseline");
+        assertEquals(null, metadata.loadRemoteVersionMarker(),
+                "initial unsafe conflict stale preserves absent marker");
+        assertDocumentEquals(staleLocal, localStore.currentDocument,
+                "initial unsafe conflict stale preserves changed local");
     }
 
     private static void verifyPullOnlyRecordsBaselineAndFailurePreservesMetadata() {
@@ -488,7 +557,7 @@ public final class WebDavSyncStoryTest {
         assertEquals(expectedStoredMarker, metadata.loadRemoteVersionMarker(), label + " fresh pull records marker");
     }
 
-    private static void assertNonEmptyLocalUnsafeMarkerRequiresConfirmation(
+    private static void assertInitialUnsafeMarkerIndependentLocalOnlyRequiresConfirmation(
             String label,
             String headEtag,
             String getEtag) {
@@ -508,6 +577,9 @@ public final class WebDavSyncStoryTest {
                 label + " non-empty confirmation status");
         assertEquals(list("HEAD", "GET"), transport.methods(), label + " non-empty request sequence");
         assertEquals(0, transport.countMethod("PUT"), label + " non-empty must not upload");
+        assertEquals(0, metadata.loadConflicts().size(), label + " non-empty keeps conflicts empty");
+        assertEquals(null, metadata.loadPendingMergedDocument(), label + " non-empty keeps no pending merge");
+        assertEquals(null, metadata.loadPendingLocalDocument(), label + " non-empty keeps no pending local");
         assertDocumentEquals(local, localStore.currentDocument, label + " non-empty preserves local");
         assertEquals(null, metadata.loadBaselineDocument(), label + " non-empty preserves absent baseline");
         assertEquals(null, metadata.loadRemoteVersionMarker(), label + " non-empty preserves absent marker");
@@ -621,6 +693,7 @@ public final class WebDavSyncStoryTest {
         private SyncDocument currentDocument;
         private final List<SyncDocument> appliedDocuments = new ArrayList<SyncDocument>();
         private SyncDocument changeBeforeApplyDocument;
+        private SyncDocument changeBeforeValidationDocument;
 
         RecordingLocalStore(SyncDocument currentDocument) {
             this.currentDocument = currentDocument;
@@ -633,6 +706,10 @@ public final class WebDavSyncStoryTest {
 
         @Override
         public boolean isCurrentDocument(SyncDocument expectedDocument) {
+            if (changeBeforeValidationDocument != null) {
+                currentDocument = changeBeforeValidationDocument;
+                changeBeforeValidationDocument = null;
+            }
             return json(currentDocument).equals(json(expectedDocument));
         }
 
@@ -662,6 +739,10 @@ public final class WebDavSyncStoryTest {
 
         void changeCurrentOnNextApply(SyncDocument document) {
             changeBeforeApplyDocument = document;
+        }
+
+        void changeCurrentOnNextValidation(SyncDocument document) {
+            changeBeforeValidationDocument = document;
         }
     }
 

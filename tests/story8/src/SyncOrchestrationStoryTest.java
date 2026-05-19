@@ -17,6 +17,7 @@ import name.soulayrol.rhaa.sholi.sync.document.SyncItem;
 import name.soulayrol.rhaa.sholi.sync.merge.ConflictChoice;
 import name.soulayrol.rhaa.sholi.sync.merge.SyncConflict;
 import name.soulayrol.rhaa.sholi.sync.merge.SyncMetadataStore;
+import name.soulayrol.rhaa.sholi.sync.orchestration.ResolvedConflictAwareSyncRunner;
 import name.soulayrol.rhaa.sholi.sync.orchestration.ResolvedConflictSyncService;
 import name.soulayrol.rhaa.sholi.sync.orchestration.SyncConflictDisplayModel;
 import name.soulayrol.rhaa.sholi.sync.orchestration.WebDavSyncController;
@@ -58,6 +59,10 @@ public final class SyncOrchestrationStoryTest {
         verifyLocalEditAfterConflictCaptureBeforeResumeDoesNotUploadStaleResolution();
         verifyLocalEditDuringResolvedConflictUploadDoesNotApplyOrRecordStaleResolution();
         verifyUnsafeResolvedConflictMarkerRequiresConfirmationWithoutUpload();
+        verifyStaleResolvedPreconditionFallsBackToNormalSync();
+        verifyStaleResolvedLocalChangedFallsBackToNormalSync();
+        verifySuccessfulResolvedResumeDoesNotRunNormalSync();
+        verifyUnresolvedConflictsDoNotRunResolvedResume();
         verifyConfiguredDisplayNameSourcesLocalEditMetadata();
         verifySyncMenuAndConflictUiSources();
     }
@@ -779,6 +784,182 @@ public final class SyncOrchestrationStoryTest {
                 "unsafe mixed marker resume status");
         assertEquals(0, uploader.uploads.size(), "unsafe mixed marker does not upload");
         assertEquals(2, metadata.loadConflicts().size(), "unsafe mixed marker keeps conflicts for later");
+    }
+
+    private static void verifyStaleResolvedPreconditionFallsBackToNormalSync() {
+        SyncConflict staleResolved = conflict(
+                "sync-stale-precondition",
+                item("sync-stale-precondition", "Apples", 1, false, 10L, "base"),
+                item("sync-stale-precondition", "Green apples", 1, false, 20L, "phone"),
+                item("sync-stale-precondition", "Red apples", 1, false, 30L, "tablet"),
+                "\"v2\"").withStatus(SyncConflict.STATUS_RESOLVED_LOCAL);
+        final SyncConflict freshUnresolved = conflict(
+                "sync-fresh-precondition",
+                item("sync-fresh-precondition", "Tea", 1, false, 10L, "base"),
+                item("sync-fresh-precondition", "Green tea", 1, false, 40L, "phone"),
+                item("sync-fresh-precondition", "Black tea", 1, false, 50L, "tablet"),
+                "\"v4\"");
+        final RecordingMetadataStore metadata = new RecordingMetadataStore(
+                document(staleResolved.getBaselineItem()), "\"v1\"");
+        metadata.replaceConflicts(Collections.singletonList(staleResolved));
+        final int[] normalCalls = new int[] {0};
+        final int[] resumeCalls = new int[] {0};
+        ResolvedConflictAwareSyncRunner runner = new ResolvedConflictAwareSyncRunner(
+                metadata,
+                new ResolvedConflictAwareSyncRunner.NormalSyncOperation() {
+                    @Override
+                    public WebDavSyncResult synchronize() {
+                        normalCalls[0]++;
+                        metadata.replaceConflicts(Collections.singletonList(freshUnresolved));
+                        return WebDavSyncResult.conflicts(metadata.loadConflicts());
+                    }
+                },
+                new ResolvedConflictAwareSyncRunner.ResolvedConflictResumeOperation() {
+                    @Override
+                    public WebDavSyncResult resumeResolvedConflicts() {
+                        resumeCalls[0]++;
+                        return WebDavSyncResult.status(
+                                WebDavSyncResult.Status.PRECONDITION_FAILED,
+                                "Remote sync document changed before resolved conflicts could upload");
+                    }
+                });
+
+        WebDavSyncResult result = runner.synchronizeOrResume();
+
+        assertEquals(1, resumeCalls[0], "stale precondition resume call count");
+        assertEquals(1, normalCalls[0], "stale precondition normal sync fallback count");
+        assertEquals(WebDavSyncResult.Status.CONFLICTS, result.getStatus(),
+                "stale precondition fallback returns normal sync result");
+        assertEquals("sync-fresh-precondition", result.getConflicts().get(0).getSyncId(),
+                "stale precondition exposes fresh conflict");
+        assertEquals(SyncConflict.STATUS_UNRESOLVED, metadata.loadConflicts().get(0).getStatus(),
+                "stale precondition stores fresh unresolved conflict");
+    }
+
+    private static void verifyStaleResolvedLocalChangedFallsBackToNormalSync() {
+        SyncConflict staleResolved = conflict(
+                "sync-stale-local-changed",
+                item("sync-stale-local-changed", "Milk", 1, false, 10L, "base"),
+                item("sync-stale-local-changed", "Oat milk", 1, false, 20L, "phone"),
+                item("sync-stale-local-changed", "Soy milk", 1, false, 30L, "tablet"),
+                "\"v2\"").withStatus(SyncConflict.STATUS_RESOLVED_REMOTE);
+        final SyncConflict freshUnresolved = conflict(
+                "sync-fresh-local-changed",
+                item("sync-fresh-local-changed", "Coffee", 1, false, 10L, "base"),
+                item("sync-fresh-local-changed", "Decaf", 1, false, 40L, "phone"),
+                item("sync-fresh-local-changed", "Espresso", 1, false, 50L, "tablet"),
+                "\"v5\"");
+        final RecordingMetadataStore metadata = new RecordingMetadataStore(
+                document(staleResolved.getBaselineItem()), "\"v1\"");
+        metadata.replaceConflicts(Collections.singletonList(staleResolved));
+        final int[] normalCalls = new int[] {0};
+        final int[] resumeCalls = new int[] {0};
+        ResolvedConflictAwareSyncRunner runner = new ResolvedConflictAwareSyncRunner(
+                metadata,
+                new ResolvedConflictAwareSyncRunner.NormalSyncOperation() {
+                    @Override
+                    public WebDavSyncResult synchronize() {
+                        normalCalls[0]++;
+                        metadata.replaceConflicts(Collections.singletonList(freshUnresolved));
+                        return WebDavSyncResult.conflicts(metadata.loadConflicts());
+                    }
+                },
+                new ResolvedConflictAwareSyncRunner.ResolvedConflictResumeOperation() {
+                    @Override
+                    public WebDavSyncResult resumeResolvedConflicts() {
+                        resumeCalls[0]++;
+                        return WebDavSyncResult.status(
+                                WebDavSyncResult.Status.LOCAL_CHANGED,
+                                "Local items changed during synchronization; please retry");
+                    }
+                });
+
+        WebDavSyncResult result = runner.synchronizeOrResume();
+
+        assertEquals(1, resumeCalls[0], "stale local changed resume call count");
+        assertEquals(1, normalCalls[0], "stale local changed normal sync fallback count");
+        assertEquals(WebDavSyncResult.Status.CONFLICTS, result.getStatus(),
+                "stale local changed fallback returns normal sync result");
+        assertEquals("sync-fresh-local-changed", result.getConflicts().get(0).getSyncId(),
+                "stale local changed exposes fresh conflict");
+        assertEquals(SyncConflict.STATUS_UNRESOLVED, metadata.loadConflicts().get(0).getStatus(),
+                "stale local changed stores fresh unresolved conflict");
+    }
+
+    private static void verifySuccessfulResolvedResumeDoesNotRunNormalSync() {
+        SyncConflict resolved = conflict(
+                "sync-resolved-success",
+                item("sync-resolved-success", "Butter", 1, false, 10L, "base"),
+                item("sync-resolved-success", "Butter", 2, false, 20L, "phone"),
+                item("sync-resolved-success", "Butter", 0, false, 30L, "tablet"),
+                "\"v2\"").withStatus(SyncConflict.STATUS_RESOLVED_LOCAL);
+        RecordingMetadataStore metadata = new RecordingMetadataStore(
+                document(resolved.getBaselineItem()), "\"v1\"");
+        metadata.replaceConflicts(Collections.singletonList(resolved));
+        final int[] normalCalls = new int[] {0};
+        final int[] resumeCalls = new int[] {0};
+        ResolvedConflictAwareSyncRunner runner = new ResolvedConflictAwareSyncRunner(
+                metadata,
+                new ResolvedConflictAwareSyncRunner.NormalSyncOperation() {
+                    @Override
+                    public WebDavSyncResult synchronize() {
+                        normalCalls[0]++;
+                        return WebDavSyncResult.status(WebDavSyncResult.Status.UP_TO_DATE,
+                                "Normal sync should not run after successful resolved upload");
+                    }
+                },
+                new ResolvedConflictAwareSyncRunner.ResolvedConflictResumeOperation() {
+                    @Override
+                    public WebDavSyncResult resumeResolvedConflicts() {
+                        resumeCalls[0]++;
+                        return WebDavSyncResult.status(WebDavSyncResult.Status.UPDATED_REMOTE,
+                                "Uploaded resolved synchronization conflicts");
+                    }
+                });
+
+        WebDavSyncResult result = runner.synchronizeOrResume();
+
+        assertEquals(WebDavSyncResult.Status.UPDATED_REMOTE, result.getStatus(),
+                "successful resolved resume result");
+        assertEquals(1, resumeCalls[0], "successful resolved resume call count");
+        assertEquals(0, normalCalls[0], "successful resolved resume skips normal sync");
+    }
+
+    private static void verifyUnresolvedConflictsDoNotRunResolvedResume() {
+        SyncConflict unresolved = conflict(
+                "sync-unresolved-orchestration",
+                item("sync-unresolved-orchestration", "Crackers", 1, false, 10L, "base"),
+                item("sync-unresolved-orchestration", "Rice crackers", 1, false, 20L, "phone"),
+                item("sync-unresolved-orchestration", "Saltines", 1, false, 30L, "tablet"),
+                "\"v2\"");
+        final RecordingMetadataStore metadata = new RecordingMetadataStore(
+                document(unresolved.getBaselineItem()), "\"v1\"");
+        metadata.replaceConflicts(Collections.singletonList(unresolved));
+        final int[] resumeCalls = new int[] {0};
+        ResolvedConflictAwareSyncRunner runner = new ResolvedConflictAwareSyncRunner(
+                metadata,
+                new ResolvedConflictAwareSyncRunner.NormalSyncOperation() {
+                    @Override
+                    public WebDavSyncResult synchronize() {
+                        return WebDavSyncResult.conflicts(metadata.loadConflicts());
+                    }
+                },
+                new ResolvedConflictAwareSyncRunner.ResolvedConflictResumeOperation() {
+                    @Override
+                    public WebDavSyncResult resumeResolvedConflicts() {
+                        resumeCalls[0]++;
+                        return WebDavSyncResult.status(WebDavSyncResult.Status.UPDATED_REMOTE,
+                                "Resolved resume should not run while conflicts are unresolved");
+                    }
+                });
+
+        WebDavSyncResult result = runner.synchronizeOrResume();
+
+        assertEquals(WebDavSyncResult.Status.CONFLICTS, result.getStatus(),
+                "unresolved orchestration result");
+        assertEquals("sync-unresolved-orchestration", result.getConflicts().get(0).getSyncId(),
+                "unresolved orchestration conflict remains visible");
+        assertEquals(0, resumeCalls[0], "unresolved orchestration skips resolved resume");
     }
 
     private static void verifyConfiguredDisplayNameSourcesLocalEditMetadata() throws Exception {

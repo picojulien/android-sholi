@@ -17,6 +17,7 @@ import name.soulayrol.rhaa.sholi.sync.document.SyncDocumentJson;
 import name.soulayrol.rhaa.sholi.sync.merge.ConflictChoice;
 import name.soulayrol.rhaa.sholi.sync.merge.SyncConflict;
 import name.soulayrol.rhaa.sholi.sync.merge.SyncMetadataStore;
+import name.soulayrol.rhaa.sholi.sync.orchestration.ResolvedConflictAwareSyncRunner;
 import name.soulayrol.rhaa.sholi.sync.orchestration.ResolvedConflictSyncService;
 import name.soulayrol.rhaa.sholi.sync.orchestration.WebDavSyncController;
 import name.soulayrol.rhaa.sholi.sync.settings.ConfiguredWebDavEndpoint;
@@ -41,18 +42,22 @@ public final class AndroidWebDavSyncRunner {
     }
 
     public WebDavSyncResult synchronizeOrResume() {
-        SyncStores stores = openStores();
-        List<SyncConflict> conflicts = stores.metadataStore.loadConflicts();
-        if (!conflicts.isEmpty() && !hasUnresolved(conflicts)) {
-            return resumeResolvedConflicts(stores);
-        }
-        return new WebDavSyncController(
-                stores.localStore,
+        final SyncStores stores = openStores();
+        return new ResolvedConflictAwareSyncRunner(
                 stores.metadataStore,
-                new AndroidEndpointProvider(context),
-                new WebDavSyncController.DefaultEngineFactory(
-                        new HttpUrlConnectionWebDavTransport()))
-                .synchronize();
+                new ResolvedConflictAwareSyncRunner.NormalSyncOperation() {
+                    @Override
+                    public WebDavSyncResult synchronize() {
+                        return AndroidWebDavSyncRunner.this.synchronize(stores);
+                    }
+                },
+                new ResolvedConflictAwareSyncRunner.ResolvedConflictResumeOperation() {
+                    @Override
+                    public WebDavSyncResult resumeResolvedConflicts() {
+                        return AndroidWebDavSyncRunner.this.resumeResolvedConflicts(stores);
+                    }
+                })
+                .synchronizeOrResume();
     }
 
     public List<SyncConflict> loadUnresolvedConflicts() {
@@ -77,6 +82,16 @@ public final class AndroidWebDavSyncRunner {
 
     public WebDavSyncResult resumeResolvedConflicts() {
         return resumeResolvedConflicts(openStores());
+    }
+
+    private WebDavSyncResult synchronize(SyncStores stores) {
+        return new WebDavSyncController(
+                stores.localStore,
+                stores.metadataStore,
+                new AndroidEndpointProvider(context),
+                new WebDavSyncController.DefaultEngineFactory(
+                        new HttpUrlConnectionWebDavTransport()))
+                .synchronize();
     }
 
     private WebDavSyncResult resumeResolvedConflicts(SyncStores stores) {
@@ -104,15 +119,6 @@ public final class AndroidWebDavSyncRunner {
 
     private ConfiguredWebDavEndpoint endpoint() {
         return new AndroidEndpointProvider(context).requireEndpoint();
-    }
-
-    private static boolean hasUnresolved(List<SyncConflict> conflicts) {
-        for (SyncConflict conflict: conflicts) {
-            if (SyncConflict.STATUS_UNRESOLVED.equals(conflict.getStatus())) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private static final class SyncStores {

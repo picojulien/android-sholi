@@ -36,9 +36,12 @@ import android.widget.TextView;
 
 import de.greenrobot.dao.query.LazyList;
 import de.greenrobot.dao.query.QueryBuilder;
+import name.soulayrol.rhaa.sholi.data.Operations;
 import name.soulayrol.rhaa.sholi.data.model.Checkable;
 import name.soulayrol.rhaa.sholi.data.model.Item;
 import name.soulayrol.rhaa.sholi.data.model.ItemDao;
+import name.soulayrol.rhaa.sholi.sync.items.ItemAddResolution;
+import name.soulayrol.rhaa.sholi.sync.items.ItemSyncMetadata;
 
 
 public class EditFragment extends AbstractListFragment {
@@ -107,6 +110,7 @@ public class EditFragment extends AbstractListFragment {
         LazyList<Item> list;
 
         // First build the list to be displayed with loose search.
+        builder.where(ItemDao.Properties.Deleted.eq(false));
         if (_newItemEdit != null) {
             constraint = _newItemEdit.getEditableText().toString().trim();
             if (constraint != null && !constraint.isEmpty())
@@ -122,7 +126,9 @@ public class EditFragment extends AbstractListFragment {
                 doShow = !list.get(0).getName().equals(constraint);
             else if (list.size() > 1) {
                 builder = getSession().getItemDao().queryBuilder();
-                doShow = builder.where(ItemDao.Properties.Name.eq(constraint))
+                doShow = builder.where(
+                        ItemDao.Properties.Name.eq(constraint),
+                        ItemDao.Properties.Deleted.eq(false))
                         .buildCount().count() == 0;
             }
         }
@@ -150,12 +156,39 @@ public class EditFragment extends AbstractListFragment {
                 break;
         }
 
+        Operations.touch(getActivity(), item);
         getSession().getItemDao().update(item);
         getAdapter().notifyDataSetChanged();
     }
 
     private long addItem(String name) {
-        return getSession().getItemDao().insert(new Item(null, name, Checkable.UNCHECKED));
+        String syncId = ItemSyncMetadata.initialSyncIdForName(name);
+        Item existing = findItemBySyncId(syncId);
+        ItemAddResolution resolution = ItemAddResolution.resolve(syncId, existing);
+        switch (resolution.getAction()) {
+            case RESTORE_TOMBSTONE:
+                ItemAddResolution.restoreTombstone(
+                        existing,
+                        Checkable.UNCHECKED,
+                        System.currentTimeMillis(),
+                        Operations.modifiedByName(getActivity()));
+                getSession().getItemDao().update(existing);
+                return existing.getId();
+            case IGNORE_ACTIVE_DUPLICATE:
+                return 0;
+            case INSERT_NEW:
+                Item item = Operations.newItem(getActivity(), name, Checkable.UNCHECKED);
+                item.setSyncId(resolution.getSyncId());
+                return getSession().getItemDao().insert(item);
+            default:
+                throw new IllegalStateException("Unsupported add action: " + resolution.getAction());
+        }
+    }
+
+    private Item findItemBySyncId(String syncId) {
+        return getSession().getItemDao().queryBuilder()
+                .where(ItemDao.Properties.SyncId.eq(syncId))
+                .unique();
     }
 
     private class SelectionModeHandler implements ListView.MultiChoiceModeListener {
@@ -196,7 +229,7 @@ public class EditFragment extends AbstractListFragment {
                     @Override
                     public void run() {
                         for (long id : getListView().getCheckedItemIds())
-                            getSession().getItemDao().deleteByKey(id);
+                            markItemDeleted(id);
                     }
                 });
                 getAdapter().setLazyList(createList(getActivity()));
@@ -208,6 +241,14 @@ public class EditFragment extends AbstractListFragment {
         @Override
         public void onDestroyActionMode(ActionMode mode) {
             _newItemEdit.setVisibility(View.VISIBLE);
+        }
+
+        private void markItemDeleted(long id) {
+            Item item = getSession().getItemDao().load(id);
+            if (item != null && !Boolean.TRUE.equals(item.getDeleted())) {
+                Operations.markDeleted(getActivity(), item);
+                getSession().getItemDao().update(item);
+            }
         }
     }
 }

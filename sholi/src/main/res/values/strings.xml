@@ -21,7 +21,7 @@
     xmlns:tools="http://schemas.android.com/tools"
     tools:ignore="MissingTranslation">
 
-    <string name="app_name">ShoLi</string>
+    <string name="app_name">sholi-dav</string>
 
     <!-- Menu options -->
     <string name="action_erase">Erase</string>
@@ -35,6 +35,7 @@
     <string name="action_main_about">About</string>
     <string name="action_main_data_overview">Data Overview</string>
     <string name="action_main_settings">Settings</string>
+    <string name="action_main_sync">Sync</string>
 
     <!-- Dialog messages -->
     <string name="dialog_about_version">Version %1$s (code iteration: %2$d)</string>
@@ -42,15 +43,26 @@
     <string name="dialog_about_description">A simple <i>sho</i>rt <i>li</i>sts manager</string>
     <string name="dialog_about_license">This program comes with ABSOLUTELY NO WARRANTY. This is free software, and you are welcome to redistribute it under certain conditions.\nSee http://www.gnu.org/licenses/gpl-3.0.html</string>
     <string name="dialog_about_icon">The icon is derived from <tt>List-Icon.svg</tt> which is available under an open license on <i>Wikimedia Commons</i>.</string>
-    <string name="dialog_about_title">About ShoLi</string>
+    <string name="dialog_about_title">About sholi-dav</string>
     <string name="dialog_erase_all_message">This cannot be undone. Continue?</string>
     <string name="dialog_erase_all_title">Erase All</string>
     <string name="dialog_checking_confirm_remove_checked">Remove checked items?</string>
     <string name="dialog_checking_confirm_remove_all">Empty the list?</string>
+    <string name="sync_started">Sync started.</string>
+    <string name="sync_conflicts_found">Sync stopped with conflicts.</string>
+    <string name="sync_conflict_dialog_title">Synchronization conflict</string>
+    <string name="sync_conflicts_resolved_title">Conflicts resolved</string>
+    <string name="sync_conflicts_resolved_message">All conflicts are resolved. Tap Sync to upload the resolved document.</string>
+    <string name="sync_conflict_changed_fields_label">Changed fields</string>
+    <string name="sync_conflict_modified_at_label">modified_at</string>
+    <string name="sync_conflict_status_label">Status</string>
+    <string name="sync_conflict_deleted_label">Deleted</string>
+    <string name="sync_conflict_modified_by_label">modified_by.name</string>
 
     <!-- Settings -->
     <string name="activity_settings_title">Settings</string>
     <string name="settings_category_checking">Checking</string>
+    <string name="settings_category_webdav_sync">WebDAV synchronization</string>
     <string name="settings_category_import">Import/Export</string>
     <string name="settings_category_others">Others</string>
     <string name="settings_checking_fling_to_left_action">Action on swipe to left</string>
@@ -64,6 +76,25 @@
     <string name="settings_import_marker_offlist_title">Marker for unlisted items</string>
     <string name="settings_import_merge_policy_title">Merge policy on import</string>
     <string name="settings_import_dlg_title">On import</string>
+    <string name="settings_webdav_url_title">WebDAV URL</string>
+    <string name="settings_webdav_url_summary">HTTPS WebDAV collection URL</string>
+    <string name="settings_webdav_username_title">WebDAV username</string>
+    <string name="settings_webdav_token_title">Password or app-specific token</string>
+    <string name="settings_webdav_token_summary_redacted">Stored encrypted. App-specific tokens are recommended; the value is not shown.</string>
+    <string name="settings_webdav_remote_path_title">Remote file path</string>
+    <string name="settings_webdav_remote_path_summary">Relative path to the sync JSON file.</string>
+    <string name="settings_webdav_display_name_title">Device/user display name</string>
+    <string name="settings_webdav_test_connection_title">Test connection</string>
+    <string name="settings_webdav_test_connection_summary">Validate the configured WebDAV endpoint without changing list data.</string>
+    <string name="settings_webdav_non_https_warning">Non-HTTPS WebDAV URLs can expose credentials. Use HTTPS unless you explicitly trust this connection.</string>
+    <string name="settings_webdav_url_rejected_secret">Remove usernames, passwords, tokens, auth parameters, and secrets from the WebDAV URL.</string>
+    <string name="settings_webdav_remote_path_rejected_secret">Use a relative file path only; remove URLs, queries, fragments, auth parameters, and secrets.</string>
+    <string name="settings_webdav_non_https_confirm_title">Use non-HTTPS WebDAV URL?</string>
+    <string name="settings_webdav_non_https_confirm_action">Test anyway</string>
+    <string name="settings_webdav_incomplete">Complete WebDAV URL, username, remote path, display name, and token before testing.</string>
+    <string name="settings_webdav_token_saved">WebDAV token saved encrypted.</string>
+    <string name="settings_webdav_token_cleared">WebDAV token cleared.</string>
+    <string name="settings_webdav_token_unavailable">Encrypted credential storage is unavailable. Re-enter the token later.</string>
     <string-array name="settings_checking_actions_choices">
         <item>None</item>
         <item>Check all</item>
@@ -92,7 +123,7 @@
     <string name="fragment_data_import_conclusion">Import completed.</string>
     <string name="fragment_data_export_text">The content of database can be exported using Email, SMS, or any application accepting text content.</string>
     <string name="fragment_data_export_button">Export</string>
-    <string name="fragment_data_export_subject">Sholi Database Content</string>
+    <string name="fragment_data_export_subject">sholi-dav Database Content</string>
     <string name="fragment_data_erase_text">Erase the entire content of the database. This operation is not reversible.</string>
     <string name="fragment_data_erase_button">Erase All</string>
 

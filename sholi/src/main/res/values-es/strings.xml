@@ -19,7 +19,7 @@
 -->
 <resources>
 
-    <string name="app_name">ShoLi</string>
+    <string name="app_name">sholi-dav</string>
 
     <!-- Menu options -->
     <string name="action_erase">Borrar</string>
@@ -40,7 +40,7 @@
     <string name="dialog_about_description">Gestor de listas simple <i>sho</i>rt <i>li</i>sts</string>
     <string name="dialog_about_license">Este programa se ofrece sin NINGUNA GARANTÍA. Es software libre, puede redistribuirlo bajo algunas condiciones.\nVer http://www.gnu.org/licenses/gpl-3.0.html</string>
     <string name="dialog_about_icon">El icono se deriva de <tt>List-Icon.svg</tt> el cual está disponible bajo licencia abierta en <i>Wikimedia Commons</i>.</string>
-    <string name="dialog_about_title">Acerca de ShoLi</string>
+    <string name="dialog_about_title">Acerca de sholi-dav</string>
     <string name="dialog_erase_all_message">Esta operación no puede deshacerse, ¿desea continuar?</string>
     <string name="dialog_erase_all_title">Borrar todo</string>
     <string name="dialog_checking_confirm_remove_checked">¿Eliminar elementos marcados?</string>
@@ -86,7 +86,7 @@
     <string name="fragment_data_import_conclusion">Importación completada</string>
     <string name="fragment_data_export_text">El contenido de la base de datos puede ser exportado usando Email, SMS, o cualquier otra aplicación que acepte texto como contenido.</string>
     <string name="fragment_data_export_button">Exportar</string>
-    <string name="fragment_data_export_subject">Contenido de la base de datos de ShoLi</string>
+    <string name="fragment_data_export_subject">Contenido de la base de datos de sholi-dav</string>
     <string name="fragment_data_erase_text">Borrar todo el contenido de la base de datos (esta operación no es reversible)</string>
     <string name="fragment_data_erase_button">Borrar todo</string>
 

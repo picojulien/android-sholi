@@ -1,0 +1,150 @@
+package docs;
+
+import java.io.IOException;
+import java.nio.charset.StandardCharsets;
+import java.nio.file.Files;
+import java.nio.file.Paths;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+
+public final class DocumentationQaTestRunner {
+
+    private final List<String> failures = new ArrayList<String>();
+
+    public static void main(String[] args) throws IOException {
+        DocumentationQaTestRunner runner = new DocumentationQaTestRunner();
+        runner.run();
+    }
+
+    private void run() throws IOException {
+        expect("CHANGES", "release notes describe WebDAV sync release",
+                "version 1.6.0",
+                "sholi-dav",
+                "webdav synchronization",
+                "android 6.0/api 23",
+                "encrypted",
+                "conflict");
+
+        expect("README.md", "README compatibility and features mention sync-capable support",
+                "sholi-dav",
+                "io.github.picojulien.sholidav",
+                "webdav synchronization",
+                "android 6.0/api 23");
+        reject("README.md", "README fork installation package references",
+                "fdid=name.soulayrol.rhaa.sholi",
+                "details?id=name.soulayrol.rhaa.sholi");
+
+        expect("doc/manual.md", "English manual documents WebDAV setup and sync behavior",
+                "sholi-dav",
+                "io.github.picojulien.sholidav",
+                "webdav synchronization",
+                "android 6.0/api 23",
+                "webdav url",
+                "username",
+                "password or app-specific token",
+                "remote file path",
+                "device/user display name",
+                "stored encrypted",
+                "app-specific token",
+                "no plaintext fallback",
+                "test connection",
+                "non-https",
+                "manual synchronization",
+                "success",
+                "failure",
+                "conflict",
+                "local",
+                "remote",
+                "changed fields",
+                "timestamps",
+                "status",
+                "deletion",
+                "modifier",
+                "etag",
+                "blind overwrites");
+        reject("doc/manual.md", "English manual fork installation package references",
+                "fdid=name.soulayrol.rhaa.sholi",
+                "details?id=name.soulayrol.rhaa.sholi");
+
+        expect("doc/manual_es.md", "Spanish manual includes concise WebDAV sync update",
+                "sholi-dav",
+                "io.github.picojulien.sholidav",
+                "sincronización webdav",
+                "android 6.0/api 23",
+                "url webdav",
+                "usuario",
+                "contraseña o token",
+                "ruta remota",
+                "nombre visible",
+                "cifrada",
+                "probar conexión",
+                "no https",
+                "conflicto",
+                "etag");
+        reject("doc/manual_es.md", "Spanish manual fork installation package references",
+                "fdid=name.soulayrol.rhaa.sholi",
+                "details?id=name.soulayrol.rhaa.sholi");
+
+        expectCaseSensitive("sholi/src/main/res/values/strings.xml", "English app branding resources",
+                "<string name=\"app_name\">sholi-dav</string>",
+                "<string name=\"dialog_about_title\">About sholi-dav</string>",
+                "<string name=\"fragment_data_export_subject\">sholi-dav Database Content</string>");
+        expectCaseSensitive("sholi/src/main/res/values-fr/strings.xml", "French app branding resources",
+                "<string name=\"app_name\">sholi-dav</string>",
+                "<string name=\"dialog_about_title\">À propos de sholi-dav</string>",
+                "<string name=\"fragment_data_export_subject\">Base de données sholi-dav</string>");
+        expectCaseSensitive("sholi/src/main/res/values-es/strings.xml", "Spanish app branding resources",
+                "<string name=\"app_name\">sholi-dav</string>",
+                "<string name=\"dialog_about_title\">Acerca de sholi-dav</string>",
+                "<string name=\"fragment_data_export_subject\">Contenido de la base de datos de sholi-dav</string>");
+        expectCaseSensitive("sholi/src/main/res/values/preferences_values.xml", "default WebDAV display name branding",
+                "<string name=\"settings_webdav_display_name_default\" translatable=\"false\">sholi-dav device</string>");
+
+        if (!failures.isEmpty()) {
+            for (String failure: failures) {
+                System.err.println(failure);
+            }
+            throw new AssertionError("Documentation QA failed with " + failures.size() + " missing item(s)");
+        }
+
+        System.out.println("Documentation QA passed");
+    }
+
+    private void expect(String file, String description, String... requiredPhrases) throws IOException {
+        String text = readLowercase(file);
+        for (String phrase: requiredPhrases) {
+            if (!text.contains(phrase.toLowerCase(Locale.US))) {
+                failures.add(file + " missing '" + phrase + "' for " + description);
+            }
+        }
+    }
+
+    private void reject(String file, String description, String... prohibitedPhrases) throws IOException {
+        String text = readLowercase(file);
+        for (String phrase: prohibitedPhrases) {
+            if (text.contains(phrase.toLowerCase(Locale.US))) {
+                failures.add(file + " contains prohibited '" + phrase + "' for " + description);
+            }
+        }
+    }
+
+    private void expectCaseSensitive(String file, String description, String... requiredSnippets)
+            throws IOException {
+        String text = read(file);
+        for (String snippet: requiredSnippets) {
+            if (!text.contains(snippet)) {
+                failures.add(file + " missing '" + snippet + "' for " + description);
+            }
+        }
+    }
+
+    private String readLowercase(String file) throws IOException {
+        return read(file).toLowerCase(Locale.US);
+    }
+
+    private String read(String file) throws IOException {
+        byte[] bytes = Files.readAllBytes(Paths.get(file));
+        return new String(bytes, StandardCharsets.UTF_8);
+    }
+}

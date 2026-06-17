@@ -30,7 +30,7 @@ public class Generator {
 
     private static final String GEN_PATH = "../sholi/src-gen/main/java/";
 
-    private static final int SCHEMA_VERSION = 2;
+    private static final int SCHEMA_VERSION = 3;
 
     public static void main(String[] args) throws Exception {
         Schema schema = new Schema(SCHEMA_VERSION, "name.soulayrol.rhaa.sholi.data.model");
@@ -47,8 +47,14 @@ public class Generator {
         item.setTableName("items");
         item.implementsInterface("name.soulayrol.rhaa.sholi.data.model.PersistentObject");
         item.implementsInterface("name.soulayrol.rhaa.sholi.data.model.Checkable");
+        item.implementsInterface("name.soulayrol.rhaa.sholi.sync.items.SyncTrackedItem");
         item.addIdProperty().autoincrement();
         item.addStringProperty("name").columnName("item").unique().notNull();
         item.addIntProperty("status").columnName("status");
+        item.addStringProperty("syncId").columnName("sync_id").unique();
+        item.addLongProperty("modifiedAt").columnName("modified_at");
+        item.addStringProperty("modifiedByName").columnName("modified_by_name");
+        item.addBooleanProperty("deleted").columnName("deleted");
+        item.addLongProperty("deletedSyncedAt").columnName("deleted_synced_at");
     }
 }

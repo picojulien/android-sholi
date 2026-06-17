@@ -4,7 +4,7 @@ apply plugin:'application'
 
 group = 'name.soulayrol.rhaa'
 version = '2.0.0'
-sourceCompatibility = 1.6
+sourceCompatibility = 1.8
 mainClassName = "name.soulayrol.rhaa.sholi.model.Generator"
 
 repositories {
@@ -13,7 +13,7 @@ repositories {
 }
 
 dependencies {
-    compile('de.greenrobot:greendao-generator:1.3.0')
+    implementation('de.greenrobot:greendao-generator:1.3.0')
 }
 
 sourceSets {
@@ -30,14 +30,11 @@ artifacts {
 
 task copyToLib(type: Copy) {
     into "$buildDir/libs"
-    from configurations.runtime
+    from configurations.runtimeClasspath
 }
-build.dependsOn copyToLib
 
 task generate(type: JavaExec) {
-    main = "name.soulayrol.rhaa.sholi.model.Generator"
-    classpath = files("build/libs/greendao-generator-1.3.0.jar",
-              "build/libs/freemarker-2.3.19.jar",
-              "build/libs/${project.name}-${version}.jar")
+    mainClass = "name.soulayrol.rhaa.sholi.model.Generator"
+    classpath = configurations.runtimeClasspath + files("build/libs/${project.name}-${version}.jar")
 }
 generate.dependsOn build

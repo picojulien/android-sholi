@@ -35,9 +35,11 @@ import java.lang.ref.WeakReference;
 import java.util.List;
 import java.util.concurrent.Semaphore;
 
+import de.greenrobot.dao.query.QueryBuilder;
 import name.soulayrol.rhaa.sholi.data.Operations;
 import name.soulayrol.rhaa.sholi.data.model.DaoSession;
 import name.soulayrol.rhaa.sholi.data.model.Item;
+import name.soulayrol.rhaa.sholi.data.model.ItemDao;
 
 
 public class ImportFragment extends DialogFragment {
@@ -172,7 +174,7 @@ public class ImportFragment extends DialogFragment {
 
             final DaoSession session = Operations.openSession(getActivity());
             final List<Item> items = Operations.deserialize(getActivity(), _data);
-            final List<Item> dbItems = session.getItemDao().loadAll();
+            final List<Item> dbItems = loadVisibleItems(session);
             _dataSize = items.size();
             publishProgress(0);
 
@@ -181,11 +183,12 @@ public class ImportFragment extends DialogFragment {
                 public void run() {
                     for (Item item: items) {
                         if (_policy.equals("merge")) {
-                            session.getItemDao().insertOrReplace(item);
+                            importOrRestore(session, item);
                             result.addImported();
                         } else {
                             if (!contains(item, dbItems)) {
-                                session.getItemDao().insert(item);
+                                importOrRestore(session, item);
+                                dbItems.add(item);
                                 result.addImported();
                             }
                             else
@@ -232,6 +235,34 @@ public class ImportFragment extends DialogFragment {
                 if (i.getName().equals(item.getName()))
                     return true;
             return false;
+        }
+
+        private List<Item> loadVisibleItems(DaoSession session) {
+            return session.getItemDao().queryBuilder()
+                    .where(ItemDao.Properties.Deleted.eq(false))
+                    .list();
+        }
+
+        private void importOrRestore(DaoSession session, Item item) {
+            Item existing = findExistingItem(session, item);
+            if (existing != null) {
+                existing.setName(item.getName());
+                existing.setStatus(item.getStatus());
+                Operations.restore(getActivity(), existing);
+                session.getItemDao().update(existing);
+            } else {
+                session.getItemDao().insert(item);
+            }
+        }
+
+        private Item findExistingItem(DaoSession session, Item item) {
+            QueryBuilder builder = session.getItemDao().queryBuilder();
+            List<Item> matches = builder.where(builder.or(
+                    ItemDao.Properties.SyncId.eq(item.getSyncId()),
+                    ItemDao.Properties.Name.eq(item.getName())))
+                    .orderAsc(ItemDao.Properties.Id)
+                    .list();
+            return matches.isEmpty() ? null : matches.get(0);
         }
     }
 }

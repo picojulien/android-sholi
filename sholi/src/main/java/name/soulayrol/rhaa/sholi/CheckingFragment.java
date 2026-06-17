@@ -38,6 +38,7 @@ import java.util.Map;
 import de.greenrobot.dao.query.LazyList;
 import de.greenrobot.dao.query.QueryBuilder;
 import name.soulayrol.rhaa.sholi.data.Action;
+import name.soulayrol.rhaa.sholi.data.Operations;
 import name.soulayrol.rhaa.sholi.data.model.Checkable;
 import name.soulayrol.rhaa.sholi.data.model.Item;
 import name.soulayrol.rhaa.sholi.data.model.ItemDao;
@@ -136,7 +137,8 @@ public class CheckingFragment extends AbstractListFragment implements
     protected LazyList<Item> createList(Context context) {
         QueryBuilder builder = getSession().getItemDao().queryBuilder();
         builder.where(builder.or(ItemDao.Properties.Status.eq(Checkable.CHECKED),
-                ItemDao.Properties.Status.eq(Checkable.UNCHECKED)));
+                ItemDao.Properties.Status.eq(Checkable.UNCHECKED)),
+                ItemDao.Properties.Deleted.eq(false));
         builder.orderAsc(ItemDao.Properties.Name);
         return builder.listLazy();
     }
@@ -155,6 +157,7 @@ public class CheckingFragment extends AbstractListFragment implements
                 break;
         }
 
+        Operations.touch(getActivity(), item);
         getSession().getItemDao().update(item);
         getAdapter().notifyDataSetChanged();
     }

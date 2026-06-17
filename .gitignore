@@ -1,4 +1,13 @@
-/android-sholi.iml
-/local.properties
-/.gradle
-/.idea
+android-sholi.iml
+local.properties
+.gradle
+.idea
+.gradle-home
+.epure
+.codex
+.settings
+.project
+build
+env
+tests/*/out/
+sholi/src-gen/

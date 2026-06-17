@@ -29,6 +29,10 @@ import android.view.Menu;
 import android.view.MenuItem;
 import android.view.View;
 import android.widget.TextView;
+import android.widget.Toast;
+
+import name.soulayrol.rhaa.sholi.sync.android.AndroidWebDavSyncRunner;
+import name.soulayrol.rhaa.sholi.sync.webdav.WebDavSyncResult;
 
 
 public class MainActivity extends Activity {
@@ -63,6 +67,9 @@ public class MainActivity extends Activity {
             case R.id.action_settings:
                 startActivity(new Intent(this, SettingsActivity.class));
                 return true;
+            case R.id.action_sync:
+                startSynchronization();
+                return true;
         }
         return super.onOptionsItemSelected(item);
     }
@@ -92,5 +99,44 @@ public class MainActivity extends Activity {
                 .setNeutralButton(android.R.string.ok, null)
                 .create()
                 .show();
+    }
+
+    private void startSynchronization() {
+        Toast.makeText(this, R.string.sync_started, Toast.LENGTH_SHORT).show();
+        new Thread(new Runnable() {
+            @Override
+            public void run() {
+                final WebDavSyncResult result;
+                try {
+                    result = new AndroidWebDavSyncRunner(MainActivity.this).synchronizeOrResume();
+                } catch (RuntimeException e) {
+                    WebDavSyncResult failed = WebDavSyncResult.status(
+                            WebDavSyncResult.Status.CONFIGURATION_ERROR,
+                            "WebDAV synchronization failed before it could start");
+                    runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            onSynchronizationResult(failed);
+                        }
+                    });
+                    return;
+                }
+                runOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        onSynchronizationResult(result);
+                    }
+                });
+            }
+        }, "sholi-webdav-sync").start();
+    }
+
+    private void onSynchronizationResult(WebDavSyncResult result) {
+        if (result.getStatus() == WebDavSyncResult.Status.CONFLICTS) {
+            Toast.makeText(this, R.string.sync_conflicts_found, Toast.LENGTH_LONG).show();
+            SyncConflictDialogFragment.showNext(getFragmentManager());
+            return;
+        }
+        Toast.makeText(this, result.getMessage(), Toast.LENGTH_LONG).show();
     }
 }

@@ -85,10 +85,11 @@ public final class WebDavClient {
     }
 
     public WebDavPutResult putIfMatch(String url, String body, String etag) {
-        if (!WebDavEtag.classify(etag).isStrong()) {
+        WebDavEtag ifMatch = WebDavEtag.classify(etag);
+        if (!ifMatch.isStrong()) {
             throw new IllegalArgumentException("If-Match requires a strong ETag");
         }
-        LinkedHashMap<String, String> headers = headersWith("If-Match", etag.trim());
+        LinkedHashMap<String, String> headers = headersWith("If-Match", ifMatch.getValue());
         headers.put("Content-Type", "application/json; charset=utf-8");
         return put(url, headers, body);
     }
@@ -103,7 +104,9 @@ public final class WebDavClient {
                         statusCode);
             }
             if (statusCode == 412) {
-                return WebDavPutResult.preconditionFailed(statusCode);
+                return WebDavPutResult.preconditionFailed(
+                        WebDavEtag.classify(response.getHeader("ETag")),
+                        statusCode);
             }
             return WebDavPutResult.error(toPutErrorStatus(statusCode), statusCode, messageFor(statusCode));
         } catch (WebDavTransportException e) {
@@ -181,6 +184,18 @@ public final class WebDavClient {
         if (headers != null) {
             copy.putAll(headers);
         }
+        if (!containsHeader(copy, "Accept-Encoding")) {
+            copy.put("Accept-Encoding", "identity");
+        }
         return Collections.unmodifiableMap(copy);
+    }
+
+    private static boolean containsHeader(Map<String, String> headers, String name) {
+        for (String headerName: headers.keySet()) {
+            if (name.equalsIgnoreCase(headerName)) {
+                return true;
+            }
+        }
+        return false;
     }
 }

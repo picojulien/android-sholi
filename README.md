@@ -21,7 +21,7 @@ Because this application is aimed at being available when doing shopping, it is 
 
 Sync-capable sholi-dav builds are written for Android 6.0/API 23 or newer. This minimum version allows WebDAV passwords or app-specific tokens to be stored through encrypted Android credential storage. Older Android releases should stay on the previous non-sync build.
 
-WebDAV synchronization is configured from settings with a WebDAV URL, username, password or app-specific token, remote file path, and device/user display name. The app recommends app-specific tokens, stores the secret encrypted, warns before non-HTTPS endpoints, and avoids blind overwrites by using ETags or safe conflict handling.
+WebDAV synchronization is configured from settings with a WebDAV URL, username, password or app-specific token, remote file path, and device/user display name. While the main list is open, sholi-dav runs an immediate foreground sync and then polls periodically; the manual *Sync* action remains available for explicit runs. The app recommends app-specific tokens, stores the secret encrypted, warns before non-HTTPS endpoints, and avoids blind overwrites by using ETags or safe conflict handling.
 
 ## Installation
 

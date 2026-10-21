@@ -15,6 +15,7 @@ import name.soulayrol.rhaa.sholi.sync.webdav.LocalSyncDocumentStore;
 import name.soulayrol.rhaa.sholi.sync.webdav.WebDavClient;
 import name.soulayrol.rhaa.sholi.sync.webdav.WebDavEtag;
 import name.soulayrol.rhaa.sholi.sync.webdav.WebDavMetadataResult;
+import name.soulayrol.rhaa.sholi.sync.webdav.WebDavPutResult;
 import name.soulayrol.rhaa.sholi.sync.webdav.WebDavRequest;
 import name.soulayrol.rhaa.sholi.sync.webdav.WebDavResponse;
 import name.soulayrol.rhaa.sholi.sync.webdav.WebDavSyncEngine;
@@ -30,8 +31,13 @@ public final class WebDavSyncStoryTest {
     }
 
     public static void run() throws Exception {
+        verifyStrongGzipEtagsAreCanonicalized();
         verifyCreateMissingRemoteUsesIfNoneMatch();
+        verifyPutPreconditionFailureCapturesResponseEtag();
+        verifyPutIfMatchCanonicalizesGzipEtagAndRequestsIdentity();
+        verifyExplicitAcceptEncodingDefaultHeaderIsPreserved();
         verifyUpdateExistingUsesIfMatchWithLastStrongEtag();
+        verifyGzipMarkerUpdateUsesCanonicalIfMatchAndStoresCanonicalResponse();
         verifyEtagMismatchDownloadsRemoteInsteadOfOverwrite();
         verifyPreconditionFailureDownloadsAndRetriesAfterNonConflictingMerge();
         verifyPreconditionFailureStopsOnConflicts();
@@ -47,6 +53,15 @@ public final class WebDavSyncStoryTest {
         verifyAuthorizationAndBroadAuthMaterialIsRedacted();
         verifyDisagreedHeadAndGetEtagsRequireConfirmationBeforeUpload();
         verifySecondPreconditionFailureStopsAfterSingleRetry();
+    }
+
+    private static void verifyStrongGzipEtagsAreCanonicalized() {
+        WebDavEtag etag = WebDavEtag.classify("\"abc-gzip\"");
+
+        assertEquals(true, etag.isStrong(), "gzip etag remains strong");
+        assertEquals("\"abc\"", etag.getValue(), "gzip etag canonical value");
+        assertEquals("W/\"abc-gzip\"", WebDavEtag.classify("W/\"abc-gzip\"").getValue(),
+                "weak gzip etag stays unchanged");
     }
 
     private static void verifyCreateMissingRemoteUsesIfNoneMatch() {
@@ -72,6 +87,50 @@ public final class WebDavSyncStoryTest {
         assertEquals("\"created\"", metadata.loadRemoteVersionMarker(), "created remote marker");
     }
 
+    private static void verifyPutPreconditionFailureCapturesResponseEtag() {
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(412, "\"remote-v3\"", null);
+
+        WebDavPutResult result = new WebDavClient(transport).putIfMatch(
+                REMOTE_URL,
+                "{}",
+                "\"local-v2\"");
+
+        assertEquals(WebDavPutResult.Status.PRECONDITION_FAILED, result.getStatus(),
+                "412 PUT status");
+        assertEquals("\"remote-v3\"", result.getEtag().getValue(), "412 response etag");
+        assertEquals("\"local-v2\"", transport.request(0).getHeader("If-Match"),
+                "412 request marker");
+    }
+
+    private static void verifyPutIfMatchCanonicalizesGzipEtagAndRequestsIdentity() {
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(204, "\"stored\"", null);
+
+        WebDavPutResult result = new WebDavClient(transport).putIfMatch(
+                REMOTE_URL,
+                "{}",
+                "\"abc-gzip\"");
+
+        assertEquals(WebDavPutResult.Status.SUCCESS, result.getStatus(), "gzip PUT status");
+        assertEquals("\"abc\"", transport.request(0).getHeader("If-Match"),
+                "gzip If-Match marker");
+        assertEquals("identity", transport.request(0).getHeader("Accept-Encoding"),
+                "default accept encoding");
+    }
+
+    private static void verifyExplicitAcceptEncodingDefaultHeaderIsPreserved() {
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(200, "\"v1\"", null);
+        Map<String, String> headers = new LinkedHashMap<String, String>();
+        headers.put("accept-encoding", "gzip");
+
+        new WebDavClient(transport, headers).head(REMOTE_URL);
+
+        assertEquals("gzip", transport.request(0).getHeader("Accept-Encoding"),
+                "explicit accept encoding");
+    }
+
     private static void verifyUpdateExistingUsesIfMatchWithLastStrongEtag() {
         SyncDocument baseline = document(item("sync-milk", "Milk", 1, false, 10L, "base"));
         SyncDocument local = document(item("sync-milk", "Oat milk", 1, false, 20L, "phone"));
@@ -92,6 +151,26 @@ public final class WebDavSyncStoryTest {
         assertEquals(json(local), put.getBody(), "updated remote body");
         assertDocumentEquals(local, metadata.loadBaselineDocument(), "updated baseline");
         assertEquals("\"v2\"", metadata.loadRemoteVersionMarker(), "updated marker");
+    }
+
+    private static void verifyGzipMarkerUpdateUsesCanonicalIfMatchAndStoresCanonicalResponse() {
+        SyncDocument baseline = document(item("sync-gzip", "Tea", 1, false, 10L, "base"));
+        SyncDocument local = document(item("sync-gzip", "Mint tea", 1, false, 20L, "phone"));
+        RecordingTransport transport = new RecordingTransport();
+        transport.respond(200, "\"v1-gzip\"", null);
+        transport.respond(204, "\"v2-gzip\"", null);
+        RecordingMetadataStore metadata = new RecordingMetadataStore(baseline, "\"v1-gzip\"");
+        RecordingLocalStore localStore = new RecordingLocalStore(local);
+
+        WebDavSyncResult result = engine(transport, localStore, metadata).synchronize(1125L);
+
+        assertEquals(WebDavSyncResult.Status.UPDATED_REMOTE, result.getStatus(), "gzip marker update status");
+        assertEquals(list("HEAD", "PUT"), transport.methods(), "gzip marker update request sequence");
+        assertEquals("\"v1\"", transport.request(1).getHeader("If-Match"),
+                "gzip marker canonical If-Match");
+        assertEquals("\"v2\"", metadata.loadRemoteVersionMarker(),
+                "gzip response marker stored canonically");
+        assertDocumentEquals(local, metadata.loadBaselineDocument(), "gzip marker updated baseline");
     }
 
     private static void verifyEtagMismatchDownloadsRemoteInsteadOfOverwrite() {
@@ -145,20 +224,30 @@ public final class WebDavSyncStoryTest {
     }
 
     private static void verifyPreconditionFailureStopsOnConflicts() {
+        String secret = "fresh-conflict-secret";
         SyncDocument baseline = document(item("sync-milk", "Milk", 1, false, 10L, "base"));
         SyncDocument local = document(item("sync-milk", "Oat milk", 1, false, 20L, "phone"));
         SyncDocument remote = document(item("sync-milk", "Soy milk", 1, false, 30L, "tablet"));
         RecordingTransport transport = new RecordingTransport();
         transport.respond(200, "\"v1\"", null);
-        transport.respond(412, null, null);
+        transport.respond(412, "\"remote-v3\"", null);
         transport.respond(200, "\"v2\"", json(remote));
         RecordingMetadataStore metadata = new RecordingMetadataStore(baseline, "\"v1\"");
         RecordingLocalStore localStore = new RecordingLocalStore(local);
 
-        WebDavSyncResult result = engine(transport, localStore, metadata).synchronize(1400L);
+        WebDavSyncResult result = new WebDavSyncEngine(
+                new WebDavClient(transport),
+                REMOTE_URL + "?password=" + secret,
+                localStore,
+                metadata).synchronize(1400L);
 
         assertEquals(WebDavSyncResult.Status.CONFLICTS, result.getStatus(), "412 conflict status");
         assertEquals(list("HEAD", "PUT", "GET"), transport.methods(), "412 conflict request sequence");
+        assertContains(result.getMessage(), "expected ETag: \"v1\"", "412 conflict expected marker");
+        assertContains(result.getMessage(), "response ETag: \"remote-v3\"", "412 conflict response marker");
+        assertContains(result.getMessage(), "synchronization stopped with fresh conflicts",
+                "412 conflict stop context");
+        assertDoesNotContain(secret, result.getMessage(), "412 conflict message");
         assertEquals(1, metadata.loadConflicts().size(), "412 conflict persisted");
         assertDocumentEquals(local, localStore.currentDocument, "412 conflict preserves local document");
         assertDocumentEquals(baseline, metadata.loadBaselineDocument(), "412 conflict preserves baseline");
@@ -512,7 +601,7 @@ public final class WebDavSyncStoryTest {
         transport.respond(200, "\"v1\"", null);
         transport.respond(412, null, null);
         transport.respond(200, "\"v2\"", json(remote));
-        transport.respond(412, null, null);
+        transport.respond(412, "\"v4\"", null);
         RecordingMetadataStore metadata = new RecordingMetadataStore(baseline, "\"v1\"");
         RecordingLocalStore localStore = new RecordingLocalStore(local);
 
@@ -526,6 +615,8 @@ public final class WebDavSyncStoryTest {
         assertEquals(2, transport.countMethod("PUT"), "second 412 performs one retry only");
         assertEquals("\"v1\"", transport.request(1).getHeader("If-Match"), "second 412 first marker");
         assertEquals("\"v2\"", transport.request(3).getHeader("If-Match"), "second 412 retry marker");
+        assertContains(result.getMessage(), "expected ETag: \"v2\"", "second 412 expected marker");
+        assertContains(result.getMessage(), "response ETag: \"v4\"", "second 412 response marker");
         assertEquals(json(merged), transport.request(3).getBody(), "second 412 retry merged body");
         assertEquals(0, localStore.appliedDocuments.size(), "second 412 must not apply merged document");
         assertDocumentEquals(local, localStore.currentDocument, "second 412 preserves local document");
@@ -620,6 +711,12 @@ public final class WebDavSyncStoryTest {
     private static void assertDoesNotContain(String forbidden, String content, String label) {
         if (content != null && content.contains(forbidden)) {
             throw new AssertionError("The " + label + " leaks secret material");
+        }
+    }
+
+    private static void assertContains(String content, String expected, String label) {
+        if (content == null || !content.contains(expected)) {
+            throw new AssertionError("Expected " + label + " to contain " + expected);
         }
     }
 

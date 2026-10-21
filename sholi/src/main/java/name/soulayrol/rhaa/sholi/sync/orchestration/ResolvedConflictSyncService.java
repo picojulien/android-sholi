@@ -67,6 +67,46 @@ public final class ResolvedConflictSyncService {
         return resolved;
     }
 
+    public List<SyncConflict> chooseAll(List<ConflictListSelection.SelectedChoice> choices) {
+        if (choices == null) {
+            throw new IllegalArgumentException("choices must not be null");
+        }
+        LinkedHashMap<String, ConflictChoice> choicesBySyncId = new LinkedHashMap<String, ConflictChoice>();
+        for (ConflictListSelection.SelectedChoice choice: choices) {
+            if (choice == null) {
+                throw new IllegalArgumentException("choices must not contain null entries");
+            }
+            if (choicesBySyncId.containsKey(choice.getSyncId())) {
+                throw new IllegalArgumentException("Duplicate conflict choice for sync_id " + choice.getSyncId());
+            }
+            choicesBySyncId.put(choice.getSyncId(), choice.getChoice());
+        }
+
+        List<SyncConflict> conflicts = metadataStore.loadConflicts();
+        if (choicesBySyncId.isEmpty()) {
+            return conflicts;
+        }
+
+        ArrayList<SyncConflict> updated = new ArrayList<SyncConflict>(conflicts.size());
+        LinkedHashMap<String, ConflictChoice> unmatchedChoices =
+                new LinkedHashMap<String, ConflictChoice>(choicesBySyncId);
+        for (SyncConflict conflict: conflicts) {
+            ConflictChoice choice = choicesBySyncId.get(conflict.getSyncId());
+            if (choice == null) {
+                updated.add(conflict);
+            } else {
+                updated.add(ConflictResolution.markResolved(conflict, choice));
+                unmatchedChoices.remove(conflict.getSyncId());
+            }
+        }
+        if (!unmatchedChoices.isEmpty()) {
+            throw new IllegalArgumentException(
+                    "No sync conflict found for sync_id " + unmatchedChoices.keySet().iterator().next());
+        }
+        metadataStore.replaceConflicts(updated);
+        return new ArrayList<SyncConflict>(updated);
+    }
+
     public UploadPlan prepareUpload() {
         List<SyncConflict> conflicts = metadataStore.loadConflicts();
         if (conflicts.isEmpty()) {
@@ -85,9 +125,11 @@ public final class ResolvedConflictSyncService {
         }
 
         String remoteVersionMarker = sharedRemoteVersionMarker(conflicts);
-        if (!WebDavEtag.classify(remoteVersionMarker).isStrong()) {
+        WebDavEtag remoteVersionEtag = WebDavEtag.classify(remoteVersionMarker);
+        if (!remoteVersionEtag.isStrong()) {
             return UploadPlan.confirmationRequired(conflicts);
         }
+        String safeRemoteVersionMarker = remoteVersionEtag.getValue();
         SyncDocument currentDocument = localStore.loadCurrentDocument();
         SyncDocument pendingMergedDocument = metadataStore.loadPendingMergedDocument();
         SyncDocument pendingLocalDocument = metadataStore.loadPendingLocalDocument();
@@ -97,7 +139,7 @@ public final class ResolvedConflictSyncService {
             }
             return UploadPlan.ready(
                     buildResolvedDocument(pendingMergedDocument, conflicts),
-                    remoteVersionMarker,
+                    safeRemoteVersionMarker,
                     pendingLocalDocument);
         }
         if (pendingMergedDocument != null || pendingLocalDocument != null) {
@@ -108,7 +150,7 @@ public final class ResolvedConflictSyncService {
         }
         return UploadPlan.ready(
                 buildResolvedDocument(currentDocument, conflicts),
-                remoteVersionMarker,
+                safeRemoteVersionMarker,
                 currentDocument);
     }
 
@@ -161,7 +203,10 @@ public final class ResolvedConflictSyncService {
         if (put.getStatus() == WebDavPutResult.Status.PRECONDITION_FAILED) {
             return WebDavSyncResult.status(
                     WebDavSyncResult.Status.PRECONDITION_FAILED,
-                    "Remote sync document changed before resolved conflicts could upload");
+                    preconditionFailureMessage(
+                            "Remote sync document changed before resolved conflicts could upload",
+                            plan.getRemoteVersionMarker(),
+                            put));
         }
         if (put.getStatus() == WebDavPutResult.Status.AUTH_ERROR) {
             return WebDavSyncResult.status(WebDavSyncResult.Status.AUTH_ERROR, put.getMessage());
@@ -335,6 +380,17 @@ public final class ResolvedConflictSyncService {
             return null;
         }
         return etag.getValue();
+    }
+
+    private static String preconditionFailureMessage(
+            String message,
+            String expectedMarker,
+            WebDavPutResult put) {
+        return message + " ("
+                + WebDavEtag.describeForMessage("expected ETag", expectedMarker)
+                + "; "
+                + WebDavEtag.describeForMessage("response ETag", markerFrom(put.getEtag()))
+                + ")";
     }
 
     private static WebDavSyncResult localChanged() {

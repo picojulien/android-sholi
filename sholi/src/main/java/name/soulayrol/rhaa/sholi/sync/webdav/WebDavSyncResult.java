@@ -46,9 +46,13 @@ public final class WebDavSyncResult {
     }
 
     public static WebDavSyncResult conflicts(List<SyncConflict> conflicts) {
+        return conflicts(conflicts, "Synchronization stopped with unresolved conflicts");
+    }
+
+    public static WebDavSyncResult conflicts(List<SyncConflict> conflicts, String message) {
         return new WebDavSyncResult(
                 Status.CONFLICTS,
-                "Synchronization stopped with unresolved conflicts",
+                message,
                 conflicts);
     }
 

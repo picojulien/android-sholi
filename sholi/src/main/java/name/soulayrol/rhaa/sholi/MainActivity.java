@@ -20,6 +20,7 @@ package name.soulayrol.rhaa.sholi;
 
 import android.app.Activity;
 import android.app.AlertDialog;
+import android.app.Fragment;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
@@ -37,16 +38,57 @@ import name.soulayrol.rhaa.sholi.sync.webdav.WebDavSyncResult;
 
 public class MainActivity extends Activity {
 
+    private static final long AUTOMATIC_ERROR_NOTIFICATION_INTERVAL_MILLIS = 5L * 60L * 1000L;
+
+    private static final Object SYNCHRONIZATION_GUARD = new Object();
+    private static boolean synchronizationInProgress;
+
+    private ForegroundWebDavAutoSyncController foregroundAutoSyncController;
+    private boolean foregroundAutoSyncResumed;
+    private WebDavSyncResult.Status lastAutomaticErrorStatus;
+    private long nextAutomaticErrorNotificationAtMillis;
+
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         setContentView(R.layout.activity_main);
+
+        foregroundAutoSyncController = new ForegroundWebDavAutoSyncController(
+                new ForegroundWebDavAutoSyncController.Delegate() {
+                    @Override
+                    public boolean isAutomaticSynchronizationAllowed() {
+                        return MainActivity.this.isAutomaticSynchronizationAllowed();
+                    }
+
+                    @Override
+                    public void startAutomaticSynchronization() {
+                        MainActivity.this.startAutomaticSynchronization();
+                    }
+                });
 
         PreferenceManager.setDefaultValues(this, R.xml.preferences, false);
 
         if (savedInstanceState == null && findViewById(R.id.container) != null) {
             getFragmentManager().beginTransaction().add(R.id.container, new CheckingFragment()).commit();
         }
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        startForegroundAutoSyncIfMainListVisible();
+    }
+
+    @Override
+    protected void onPause() {
+        stopForegroundAutoSync();
+        super.onPause();
+    }
+
+    @Override
+    protected void onDestroy() {
+        shutdownForegroundAutoSync();
+        super.onDestroy();
     }
 
     @Override
@@ -102,41 +144,191 @@ public class MainActivity extends Activity {
     }
 
     private void startSynchronization() {
-        Toast.makeText(this, R.string.sync_started, Toast.LENGTH_SHORT).show();
+        startSynchronization(SynchronizationTrigger.MANUAL);
+    }
+
+    private void startAutomaticSynchronization() {
+        startSynchronization(SynchronizationTrigger.AUTOMATIC);
+    }
+
+    private void startSynchronization(final SynchronizationTrigger trigger) {
+        if (trigger == SynchronizationTrigger.AUTOMATIC && !isAutomaticSynchronizationAllowed()) {
+            return;
+        }
+        if (!tryAcquireSynchronizationSlot()) {
+            if (trigger == SynchronizationTrigger.MANUAL) {
+                Toast.makeText(this, R.string.sync_already_running, Toast.LENGTH_SHORT).show();
+            }
+            return;
+        }
+        if (trigger == SynchronizationTrigger.MANUAL) {
+            Toast.makeText(this, R.string.sync_started, Toast.LENGTH_SHORT).show();
+        }
         new Thread(new Runnable() {
             @Override
             public void run() {
                 final WebDavSyncResult result;
                 try {
-                    result = new AndroidWebDavSyncRunner(MainActivity.this).synchronizeOrResume();
-                } catch (RuntimeException e) {
-                    WebDavSyncResult failed = WebDavSyncResult.status(
-                            WebDavSyncResult.Status.CONFIGURATION_ERROR,
-                            "WebDAV synchronization failed before it could start");
-                    runOnUiThread(new Runnable() {
-                        @Override
-                        public void run() {
-                            onSynchronizationResult(failed);
-                        }
-                    });
-                    return;
+                    result = runSynchronization();
+                } finally {
+                    releaseSynchronizationSlot();
                 }
                 runOnUiThread(new Runnable() {
                     @Override
                     public void run() {
-                        onSynchronizationResult(result);
+                        onSynchronizationResult(trigger, result);
                     }
                 });
             }
-        }, "sholi-webdav-sync").start();
+        }, synchronizationThreadName(trigger)).start();
     }
 
-    private void onSynchronizationResult(WebDavSyncResult result) {
+    private WebDavSyncResult runSynchronization() {
+        try {
+            return new AndroidWebDavSyncRunner(MainActivity.this).synchronizeOrResume();
+        } catch (RuntimeException e) {
+            return WebDavSyncResult.status(
+                    WebDavSyncResult.Status.CONFIGURATION_ERROR,
+                    "WebDAV synchronization failed before it could start");
+        }
+    }
+
+    private void onSynchronizationResult(SynchronizationTrigger trigger, WebDavSyncResult result) {
+        if (trigger == SynchronizationTrigger.AUTOMATIC) {
+            onAutomaticSynchronizationResult(result);
+        } else if (!isFinishing()) {
+            onManualSynchronizationResult(result);
+        }
+    }
+
+    private void onManualSynchronizationResult(WebDavSyncResult result) {
         if (result.getStatus() == WebDavSyncResult.Status.CONFLICTS) {
             Toast.makeText(this, R.string.sync_conflicts_found, Toast.LENGTH_LONG).show();
-            SyncConflictDialogFragment.showNext(getFragmentManager());
+            SyncConflictDialogFragment.showNext(getFragmentManager(), conflictMessage(result));
             return;
         }
+        if (result.isSuccess()) {
+            refreshVisibleList();
+        }
         Toast.makeText(this, result.getMessage(), Toast.LENGTH_LONG).show();
+    }
+
+    private void onAutomaticSynchronizationResult(WebDavSyncResult result) {
+        if (!isAutomaticSynchronizationAllowed()) {
+            return;
+        }
+        if (isSilentAutomaticResult(result)) {
+            resetAutomaticErrorSuppression();
+            return;
+        }
+        if (result.getStatus() == WebDavSyncResult.Status.CONFLICTS) {
+            if (!SyncConflictDialogFragment.isShowing(getFragmentManager())) {
+                SyncConflictDialogFragment.showNext(getFragmentManager(), conflictMessage(result));
+            }
+            return;
+        }
+        if (result.isSuccess()) {
+            resetAutomaticErrorSuppression();
+            refreshVisibleList();
+            return;
+        }
+        if (shouldShowAutomaticError(result, System.currentTimeMillis())) {
+            Toast.makeText(this, result.getMessage(), Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private boolean isSilentAutomaticResult(WebDavSyncResult result) {
+        return result.getStatus() == WebDavSyncResult.Status.UP_TO_DATE;
+    }
+
+    private boolean shouldShowAutomaticError(WebDavSyncResult result, long nowMillis) {
+        if (lastAutomaticErrorStatus == result.getStatus()
+                && nowMillis < nextAutomaticErrorNotificationAtMillis) {
+            return false;
+        }
+        lastAutomaticErrorStatus = result.getStatus();
+        nextAutomaticErrorNotificationAtMillis = nowMillis + AUTOMATIC_ERROR_NOTIFICATION_INTERVAL_MILLIS;
+        return true;
+    }
+
+    private void resetAutomaticErrorSuppression() {
+        lastAutomaticErrorStatus = null;
+        nextAutomaticErrorNotificationAtMillis = 0L;
+    }
+
+    private boolean tryAcquireSynchronizationSlot() {
+        synchronized (SYNCHRONIZATION_GUARD) {
+            if (synchronizationInProgress) {
+                return false;
+            }
+            synchronizationInProgress = true;
+            return true;
+        }
+    }
+
+    private void releaseSynchronizationSlot() {
+        synchronized (SYNCHRONIZATION_GUARD) {
+            synchronizationInProgress = false;
+        }
+    }
+
+    private String synchronizationThreadName(SynchronizationTrigger trigger) {
+        return trigger == SynchronizationTrigger.AUTOMATIC
+                ? "sholi-automatic-webdav-sync"
+                : "sholi-webdav-sync";
+    }
+
+    private void startForegroundAutoSyncIfMainListVisible() {
+        foregroundAutoSyncResumed = true;
+        if (foregroundAutoSyncController != null && isMainListUiVisible()) {
+            foregroundAutoSyncController.start();
+        }
+    }
+
+    private void stopForegroundAutoSync() {
+        foregroundAutoSyncResumed = false;
+        if (foregroundAutoSyncController != null) {
+            foregroundAutoSyncController.stop();
+        }
+    }
+
+    private void shutdownForegroundAutoSync() {
+        foregroundAutoSyncResumed = false;
+        if (foregroundAutoSyncController != null) {
+            foregroundAutoSyncController.shutdown();
+            foregroundAutoSyncController = null;
+        }
+    }
+
+    private boolean isAutomaticSynchronizationAllowed() {
+        return foregroundAutoSyncResumed
+                && isMainListUiVisible()
+                && !SyncConflictDialogFragment.isShowing(getFragmentManager());
+    }
+
+    private boolean isMainListUiVisible() {
+        return !isFinishing() && findViewById(R.id.container) != null;
+    }
+
+    private void refreshVisibleList() {
+        Fragment fragment = getFragmentManager().findFragmentById(R.id.container);
+        if (fragment instanceof AbstractListFragment
+                && fragment.isAdded()
+                && fragment.getActivity() == this) {
+            ((AbstractListFragment) fragment).refreshList();
+        }
+    }
+
+    private String conflictMessage(WebDavSyncResult result) {
+        String message = result.getMessage();
+        if (message != null && message.trim().length() > 0) {
+            return message;
+        }
+        return getString(R.string.sync_conflicts_found);
+    }
+
+    private enum SynchronizationTrigger {
+        MANUAL,
+        AUTOMATIC
     }
 }

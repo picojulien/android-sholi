@@ -43,12 +43,15 @@ public abstract class AbstractLazyListAdapter<T extends PersistentObject> extend
     }
 
     public void setLazyList(LazyList<T> list) {
-    if (list != _lazyList) {
-        _lazyList.close();
-        _lazyList = list;
-        notifyDataSetChanged();
+        if (list != _lazyList) {
+            if (_lazyList != null) {
+                _lazyList.close();
+            }
+            _lazyList = list;
+            notifyDataSetChanged();
+        }
     }
-}
+
     public int getTextSize() {
         return _textSize;
     }

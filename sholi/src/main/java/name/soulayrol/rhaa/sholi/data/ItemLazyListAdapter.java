@@ -18,8 +18,6 @@
 package name.soulayrol.rhaa.sholi.data;
 
 import android.content.Context;
-import android.graphics.Color;
-import android.graphics.Paint;
 import android.view.LayoutInflater;
 import android.view.View;
 import android.view.ViewGroup;
@@ -27,7 +25,6 @@ import android.widget.TextView;
 
 import de.greenrobot.dao.query.LazyList;
 import name.soulayrol.rhaa.sholi.R;
-import name.soulayrol.rhaa.sholi.data.model.Checkable;
 import name.soulayrol.rhaa.sholi.data.model.Item;
 
 
@@ -45,21 +42,6 @@ public class ItemLazyListAdapter extends AbstractLazyListAdapter<Item> {
     @Override
     public void bindView(View view, Context context, Item item) {
         TextView name = (TextView) view.findViewById(R.id.item_name);
-        name.setText(item.getName());
-        name.setTextSize(getTextSize());
-        switch (item.getStatus()) {
-            case Checkable.OFF_LIST:
-                name.setPaintFlags(name.getPaintFlags() & ~Paint.STRIKE_THRU_TEXT_FLAG);
-                name.setTextColor(Color.GRAY);
-                break;
-            case Checkable.UNCHECKED:
-                name.setPaintFlags(name.getPaintFlags() & ~Paint.STRIKE_THRU_TEXT_FLAG);
-                name.setTextColor(Color.GREEN);
-                break;
-            case Checkable.CHECKED:
-                name.setPaintFlags(name.getPaintFlags() | Paint.STRIKE_THRU_TEXT_FLAG);
-                name.setTextColor(Color.WHITE);
-                break;
-        }
+        ItemViewStyler.bindName(name, item.getName(), item.getStatus(), getTextSize());
     }
 }

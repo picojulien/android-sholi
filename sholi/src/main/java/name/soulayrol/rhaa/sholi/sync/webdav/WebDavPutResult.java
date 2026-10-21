@@ -30,9 +30,13 @@ public final class WebDavPutResult {
     }
 
     public static WebDavPutResult preconditionFailed(int statusCode) {
+        return preconditionFailed(WebDavEtag.classify(null), statusCode);
+    }
+
+    public static WebDavPutResult preconditionFailed(WebDavEtag etag, int statusCode) {
         return new WebDavPutResult(
                 Status.PRECONDITION_FAILED,
-                WebDavEtag.classify(null),
+                etag == null ? WebDavEtag.classify(null) : etag,
                 statusCode,
                 "WebDAV precondition failed");
     }

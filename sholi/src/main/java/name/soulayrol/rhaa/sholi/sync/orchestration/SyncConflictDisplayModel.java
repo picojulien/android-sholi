@@ -76,6 +76,14 @@ public final class SyncConflictDisplayModel {
         return remote.isPresent();
     }
 
+    public boolean isLocalNew() {
+        return isNewSide(local, remote);
+    }
+
+    public boolean isRemoteNew() {
+        return isNewSide(remote, local);
+    }
+
     public String toDisplayText() {
         StringBuilder builder = new StringBuilder();
         builder.append("Sync ID: ").append(syncId).append('\n');
@@ -85,6 +93,21 @@ public final class SyncConflictDisplayModel {
         builder.append("Local: ").append(local.toDisplayText()).append('\n');
         builder.append("Remote: ").append(remote.toDisplayText());
         return builder.toString();
+    }
+
+    private static boolean isNewSide(Side candidate, Side other) {
+        if (!candidate.isPresent()) {
+            return false;
+        }
+        if (!other.isPresent()) {
+            return true;
+        }
+        Long candidateModifiedAt = candidate.getModifiedAt();
+        Long otherModifiedAt = other.getModifiedAt();
+        if (candidateModifiedAt == null || otherModifiedAt == null) {
+            return false;
+        }
+        return candidateModifiedAt.longValue() > otherModifiedAt.longValue();
     }
 
     public static final class Side {

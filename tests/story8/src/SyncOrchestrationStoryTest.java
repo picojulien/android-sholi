@@ -19,10 +19,13 @@ import name.soulayrol.rhaa.sholi.sync.merge.SyncConflict;
 import name.soulayrol.rhaa.sholi.sync.merge.SyncMetadataStore;
 import name.soulayrol.rhaa.sholi.sync.orchestration.ResolvedConflictAwareSyncRunner;
 import name.soulayrol.rhaa.sholi.sync.orchestration.ResolvedConflictSyncService;
+import name.soulayrol.rhaa.sholi.sync.orchestration.ConflictSideSelection;
+import name.soulayrol.rhaa.sholi.sync.orchestration.ConflictListSelection;
 import name.soulayrol.rhaa.sholi.sync.orchestration.SyncConflictDisplayModel;
 import name.soulayrol.rhaa.sholi.sync.orchestration.WebDavSyncController;
 import name.soulayrol.rhaa.sholi.sync.settings.ConfiguredWebDavEndpoint;
 import name.soulayrol.rhaa.sholi.sync.webdav.LocalSyncDocumentStore;
+import name.soulayrol.rhaa.sholi.sync.webdav.WebDavEtag;
 import name.soulayrol.rhaa.sholi.sync.webdav.WebDavPutResult;
 import name.soulayrol.rhaa.sholi.sync.webdav.WebDavRequest;
 import name.soulayrol.rhaa.sholi.sync.webdav.WebDavResponse;
@@ -48,9 +51,12 @@ public final class SyncOrchestrationStoryTest {
         verifyUploadFailurePreservesLocalDataAndMetadata();
         verifyUnresolvedConflictsPersistAndBlockFurtherUploads();
         verifyConflictDisplayModelShowsRequiredCompleteComparisonFields();
+        verifyConflictSideSelectionBehavior();
+        verifyConflictListSelectionCompletenessAndStableChoices();
         verifyDisplayModelAndDialogDoNotOfferMissingSideChoices();
         verifyChoosingLocalOrRemoteResolvesCompleteItemVersion();
         verifyMissingSideResolutionIsRejectedAndConflictStaysUnresolved();
+        verifyBatchConflictChoicesAreAtomicWhenLaterChoiceInvalid();
         verifyRemainingUnresolvedConflictBlocksResumeUpload();
         verifyAllResolvedConflictsProduceAndUploadResolvedDocument();
         verifyResolvedConflictsPreservePendingNonConflictingRemoteChanges();
@@ -59,10 +65,14 @@ public final class SyncOrchestrationStoryTest {
         verifyLocalEditAfterConflictCaptureBeforeResumeDoesNotUploadStaleResolution();
         verifyLocalEditDuringResolvedConflictUploadDoesNotApplyOrRecordStaleResolution();
         verifyUnsafeResolvedConflictMarkerRequiresConfirmationWithoutUpload();
+        verifyResolvedConflictPreconditionMessageIncludesEtags();
+        verifyResolvedConflictGzipMarkerUsesCanonicalUploadAndDiagnostics();
+        verifyStoredChoicesUseStaleAwareFallbacks();
         verifyStaleResolvedPreconditionFallsBackToNormalSync();
         verifyStaleResolvedLocalChangedFallsBackToNormalSync();
         verifySuccessfulResolvedResumeDoesNotRunNormalSync();
         verifyUnresolvedConflictsDoNotRunResolvedResume();
+        verifyResolvedUploadClearsConflictsBeforeSubsequentSync();
         verifyConfiguredDisplayNameSourcesLocalEditMetadata();
         verifySyncMenuAndConflictUiSources();
     }
@@ -328,6 +338,30 @@ public final class SyncOrchestrationStoryTest {
         assertContains(text, "modified_at=30", "display remote timestamp");
         assertContains(text, "modified_by.name=phone-user", "display local modifier");
         assertContains(text, "modified_by.name=tablet-user", "display remote modifier");
+        assertEquals(false, model.isLocalNew(), "older local side not marked new");
+        assertEquals(true, model.isRemoteNew(), "newer remote side marked new");
+
+        SyncConflict localOnly = conflict(
+                "sync-local-only",
+                item("sync-local-only", "Tea", 1, false, 10L, "base"),
+                item("sync-local-only", "Green tea", 1, false, 20L, "phone"),
+                null,
+                "\"v2\"");
+        SyncConflict sameAge = conflict(
+                "sync-same-age",
+                item("sync-same-age", "Juice", 1, false, 10L, "base"),
+                item("sync-same-age", "Apple juice", 1, false, 40L, "phone"),
+                item("sync-same-age", "Orange juice", 1, false, 40L, "tablet"),
+                "\"v2\"");
+
+        assertEquals(true, SyncConflictDisplayModel.from(localOnly).isLocalNew(),
+                "only present local side marked new");
+        assertEquals(false, SyncConflictDisplayModel.from(localOnly).isRemoteNew(),
+                "missing remote side not marked new");
+        assertEquals(false, SyncConflictDisplayModel.from(sameAge).isLocalNew(),
+                "equal local timestamp not marked new");
+        assertEquals(false, SyncConflictDisplayModel.from(sameAge).isRemoteNew(),
+                "equal remote timestamp not marked new");
     }
 
     private static void verifyDisplayModelAndDialogDoNotOfferMissingSideChoices() throws Exception {
@@ -359,6 +393,114 @@ public final class SyncOrchestrationStoryTest {
                 "missing remote display text");
         assertContains(conflictDialog, "canChooseLocal()", "conflict dialog local availability gate");
         assertContains(conflictDialog, "canChooseRemote()", "conflict dialog remote availability gate");
+    }
+
+    private static void verifyConflictSideSelectionBehavior() {
+        ConflictSideSelection bothSides = new ConflictSideSelection(true, true);
+
+        assertEquals(true, bothSides.canChooseLocal(), "both sides local available");
+        assertEquals(true, bothSides.canChooseRemote(), "both sides remote available");
+        assertEquals(false, bothSides.hasSelection(), "both sides start without selection");
+        assertEquals(null, bothSides.getSelectedChoice(), "both sides initial selected choice");
+
+        assertEquals(true, bothSides.selectLocal(), "local tap selection accepted");
+        assertEquals(ConflictChoice.LOCAL, bothSides.getSelectedChoice(), "local tap selected local");
+        assertEquals(true, bothSides.hasSelection(), "local tap creates selection");
+        assertEquals(true, bothSides.selectRemote(), "remote tap selection accepted");
+        assertEquals(ConflictChoice.REMOTE, bothSides.getSelectedChoice(), "remote tap selected remote");
+
+        ConflictSideSelection swipes = new ConflictSideSelection(true, true);
+        assertEquals(true, swipes.selectFromSwipeDelta(-42.0f), "swipe left accepted");
+        assertEquals(ConflictChoice.LOCAL, swipes.getSelectedChoice(), "swipe left selects local");
+        assertEquals(true, swipes.selectFromSwipeDelta(42.0f), "swipe right accepted");
+        assertEquals(ConflictChoice.REMOTE, swipes.getSelectedChoice(), "swipe right selects remote");
+        assertEquals(false, swipes.selectFromSwipeDelta(0.0f), "zero swipe ignored");
+        assertEquals(ConflictChoice.REMOTE, swipes.getSelectedChoice(), "ignored swipe preserves selection");
+
+        ConflictSideSelection localOnly = new ConflictSideSelection(true, false);
+        assertEquals(true, localOnly.hasSelection(), "local-only conflict auto-selects present side");
+        assertEquals(ConflictChoice.LOCAL, localOnly.getSelectedChoice(), "local-only selects local");
+        assertEquals(false, localOnly.selectRemote(), "missing remote tap rejected");
+        assertEquals(ConflictChoice.LOCAL, localOnly.getSelectedChoice(), "rejected remote keeps local selected");
+        assertEquals(false, localOnly.selectFromSwipeDelta(42.0f), "swipe toward missing remote rejected");
+        assertEquals(ConflictChoice.LOCAL, localOnly.getSelectedChoice(), "missing remote swipe keeps local selected");
+
+        ConflictSideSelection remoteOnly = new ConflictSideSelection(false, true);
+        assertEquals(true, remoteOnly.hasSelection(), "remote-only conflict auto-selects present side");
+        assertEquals(ConflictChoice.REMOTE, remoteOnly.getSelectedChoice(), "remote-only selects remote");
+        assertEquals(false, remoteOnly.selectLocal(), "missing local tap rejected");
+        assertEquals(ConflictChoice.REMOTE, remoteOnly.getSelectedChoice(), "rejected local keeps remote selected");
+        assertEquals(false, remoteOnly.selectFromSwipeDelta(-42.0f), "swipe toward missing local rejected");
+        assertEquals(ConflictChoice.REMOTE, remoteOnly.getSelectedChoice(), "missing local swipe keeps remote selected");
+
+        ConflictSideSelection neitherSide = new ConflictSideSelection(false, false);
+        assertEquals(false, neitherSide.hasSelection(), "no-side conflict starts without selection");
+        assertEquals(false, neitherSide.selectLocal(), "no-side local tap rejected");
+        assertEquals(false, neitherSide.selectRemote(), "no-side remote tap rejected");
+        assertEquals(false, neitherSide.selectFromSwipeDelta(-42.0f), "no-side swipe rejected");
+        assertEquals(null, neitherSide.getSelectedChoice(), "no-side rejected choices keep no selection");
+    }
+
+    private static void verifyConflictListSelectionCompletenessAndStableChoices() {
+        SyncConflict first = conflict(
+                "sync-list-a",
+                item("sync-list-a", "Apples", 1, false, 10L, "base"),
+                item("sync-list-a", "Green apples", 1, false, 20L, "phone"),
+                item("sync-list-a", "Red apples", 1, false, 30L, "tablet"),
+                "\"v2\"");
+        SyncConflict second = conflict(
+                "sync-list-b",
+                item("sync-list-b", "Butter", 1, false, 10L, "base"),
+                item("sync-list-b", "Butter", 2, false, 20L, "phone"),
+                item("sync-list-b", "Butter", 0, false, 30L, "tablet"),
+                "\"v2\"");
+        SyncConflict localOnly = conflict(
+                "sync-list-local-only",
+                item("sync-list-local-only", "Coffee", 1, false, 10L, "base"),
+                item("sync-list-local-only", "Decaf coffee", 1, false, 20L, "phone"),
+                null,
+                "\"v2\"");
+        SyncConflict remoteOnly = conflict(
+                "sync-list-remote-only",
+                item("sync-list-remote-only", "Tea", 1, false, 10L, "base"),
+                null,
+                item("sync-list-remote-only", "Black tea", 1, false, 30L, "tablet"),
+                "\"v2\"");
+
+        ConflictListSelection selection = ConflictListSelection.fromConflicts(
+                list(first, second, localOnly, remoteOnly));
+
+        assertEquals(false, selection.isComplete(), "multi-conflict starts incomplete");
+        assertEquals(ConflictChoice.LOCAL, selection.getSelectedChoice("sync-list-local-only"),
+                "local-only row auto-selects local");
+        assertEquals(ConflictChoice.REMOTE, selection.getSelectedChoice("sync-list-remote-only"),
+                "remote-only row auto-selects remote");
+        assertEquals(false, selection.select("sync-list-local-only", ConflictChoice.REMOTE),
+                "missing remote side rejected in list");
+        assertEquals(ConflictChoice.LOCAL, selection.getSelectedChoice("sync-list-local-only"),
+                "rejected missing side keeps auto-selected local");
+        assertEquals(false, selection.select("sync-list-missing", ConflictChoice.LOCAL),
+                "unknown conflict row rejected");
+
+        assertEquals(true, selection.select("sync-list-a", ConflictChoice.LOCAL),
+                "first row local tap accepted");
+        assertEquals(false, selection.isComplete(), "one unresolved row keeps confirm disabled");
+        assertEquals(true, selection.selectFromSwipeDelta("sync-list-b", 42.0f),
+                "second row swipe right accepted");
+        assertEquals(ConflictChoice.REMOTE, selection.getSelectedChoice("sync-list-b"),
+                "swipe right selects remote in list row");
+        assertEquals(true, selection.isComplete(), "all rows selected enables confirm");
+
+        List<ConflictListSelection.SelectedChoice> choices = selection.choices();
+        assertEquals(4, choices.size(), "complete list choice count");
+        assertSelectedChoice(choices.get(0), "sync-list-a", ConflictChoice.LOCAL,
+                "first stable choice");
+        assertSelectedChoice(choices.get(1), "sync-list-b", ConflictChoice.REMOTE,
+                "second stable choice");
+        assertSelectedChoice(choices.get(2), "sync-list-local-only", ConflictChoice.LOCAL,
+                "third stable auto-choice");
+        assertSelectedChoice(choices.get(3), "sync-list-remote-only", ConflictChoice.REMOTE,
+                "fourth stable auto-choice");
     }
 
     private static void verifyChoosingLocalOrRemoteResolvesCompleteItemVersion() {
@@ -453,6 +595,51 @@ public final class SyncOrchestrationStoryTest {
                 "present local side can resolve missing remote conflict");
         assertItemEquals(missingRemote.getLocalItem(), byId(localPlan.getDocument(), "sync-missing-remote-choice"),
                 "present local side selected item");
+    }
+
+    private static void verifyBatchConflictChoicesAreAtomicWhenLaterChoiceInvalid() {
+        SyncConflict first = conflict(
+                "sync-batch-valid",
+                item("sync-batch-valid", "Apples", 1, false, 10L, "base"),
+                item("sync-batch-valid", "Green apples", 1, false, 20L, "phone"),
+                item("sync-batch-valid", "Red apples", 1, false, 30L, "tablet"),
+                "\"v2\"");
+        SyncConflict second = conflict(
+                "sync-batch-invalid",
+                item("sync-batch-invalid", "Tea", 1, false, 10L, "base"),
+                null,
+                item("sync-batch-invalid", "Black tea", 1, false, 30L, "tablet"),
+                "\"v2\"");
+        RecordingLocalStore localStore = new RecordingLocalStore(document(first.getLocalItem()));
+        RecordingMetadataStore metadata = new RecordingMetadataStore(
+                document(first.getBaselineItem(), second.getBaselineItem()), "\"v1\"");
+        metadata.replaceConflicts(list(first, second));
+        RecordingConflictUploader uploader = new RecordingConflictUploader("\"v3\"");
+        ResolvedConflictSyncService service = new ResolvedConflictSyncService(localStore, metadata, uploader);
+
+        boolean rejected = false;
+        try {
+            service.chooseAll(list(
+                    new ConflictListSelection.SelectedChoice("sync-batch-valid", ConflictChoice.LOCAL),
+                    new ConflictListSelection.SelectedChoice("sync-batch-invalid", ConflictChoice.LOCAL)));
+        } catch (IllegalStateException e) {
+            rejected = true;
+            assertContains(e.getMessage(), "missing", "batch invalid choice message");
+            assertDoesNotContain(SECRET, e.getMessage(), "batch invalid choice message");
+        }
+
+        List<SyncConflict> conflicts = metadata.loadConflicts();
+        assertEquals(true, rejected, "batch invalid choice rejected");
+        assertEquals(2, conflicts.size(), "batch invalid conflict count unchanged");
+        assertEquals("sync-batch-valid", conflicts.get(0).getSyncId(),
+                "batch invalid first stable order");
+        assertEquals("sync-batch-invalid", conflicts.get(1).getSyncId(),
+                "batch invalid second stable order");
+        assertEquals(SyncConflict.STATUS_UNRESOLVED, conflicts.get(0).getStatus(),
+                "batch invalid leaves earlier valid choice unresolved");
+        assertEquals(SyncConflict.STATUS_UNRESOLVED, conflicts.get(1).getStatus(),
+                "batch invalid leaves later invalid choice unresolved");
+        assertEquals(0, uploader.uploads.size(), "batch invalid does not upload");
     }
 
     private static void verifyRemainingUnresolvedConflictBlocksResumeUpload() {
@@ -786,6 +973,207 @@ public final class SyncOrchestrationStoryTest {
         assertEquals(2, metadata.loadConflicts().size(), "unsafe mixed marker keeps conflicts for later");
     }
 
+    private static void verifyResolvedConflictPreconditionMessageIncludesEtags() {
+        assertResolvedConflictPreconditionMessageIncludesEtags(
+                "\"v3\"",
+                "response ETag: \"v3\"",
+                "resolved precondition with response etag");
+        assertResolvedConflictPreconditionMessageIncludesEtags(
+                null,
+                "response ETag: <missing>",
+                "resolved precondition missing response etag");
+    }
+
+    private static void assertResolvedConflictPreconditionMessageIncludesEtags(
+            String responseEtag,
+            String expectedResponseMessage,
+            String label) {
+        SyncConflict conflict = conflict(
+                "sync-resolved-etag",
+                item("sync-resolved-etag", "Apples", 1, false, 10L, "base"),
+                item("sync-resolved-etag", "Green apples", 1, false, 20L, "phone"),
+                item("sync-resolved-etag", "Red apples", 1, false, 30L, "tablet"),
+                "\"v2\"");
+        RecordingLocalStore localStore = new RecordingLocalStore(document(conflict.getLocalItem()));
+        RecordingMetadataStore metadata = new RecordingMetadataStore(
+                document(conflict.getBaselineItem()), "\"v1\"");
+        metadata.replaceConflicts(Collections.singletonList(conflict));
+        FixedConflictUploader uploader = new FixedConflictUploader(
+                WebDavPutResult.preconditionFailed(WebDavEtag.classify(responseEtag), 412));
+        ResolvedConflictSyncService service = new ResolvedConflictSyncService(localStore, metadata, uploader);
+
+        service.choose("sync-resolved-etag", ConflictChoice.LOCAL);
+        WebDavSyncResult result = service.resumeResolvedConflicts();
+
+        assertEquals(WebDavSyncResult.Status.PRECONDITION_FAILED, result.getStatus(), label + " status");
+        assertEquals(1, uploader.uploads.size(), label + " upload count");
+        assertEquals("\"v2\"", uploader.uploads.get(0).marker, label + " expected upload marker");
+        assertContains(result.getMessage(), "expected ETag: \"v2\"", label + " expected marker message");
+        assertContains(result.getMessage(), expectedResponseMessage, label + " response marker message");
+        assertDoesNotContain(SECRET, result.getMessage(), label + " message");
+    }
+
+    private static void verifyResolvedConflictGzipMarkerUsesCanonicalUploadAndDiagnostics() {
+        SyncConflict conflict = conflict(
+                "sync-resolved-gzip-etag",
+                item("sync-resolved-gzip-etag", "Coffee", 1, false, 10L, "base"),
+                item("sync-resolved-gzip-etag", "Decaf coffee", 1, false, 20L, "phone"),
+                item("sync-resolved-gzip-etag", "Espresso", 1, false, 30L, "tablet"),
+                "\"v2-gzip\"");
+        RecordingLocalStore localStore = new RecordingLocalStore(document(conflict.getLocalItem()));
+        RecordingMetadataStore metadata = new RecordingMetadataStore(
+                document(conflict.getBaselineItem()), "\"v1\"");
+        metadata.replaceConflicts(Collections.singletonList(conflict));
+        FixedConflictUploader uploader = new FixedConflictUploader(
+                WebDavPutResult.preconditionFailed(WebDavEtag.classify("\"v4-gzip\""), 412));
+        ResolvedConflictSyncService service = new ResolvedConflictSyncService(localStore, metadata, uploader);
+
+        service.choose("sync-resolved-gzip-etag", ConflictChoice.LOCAL);
+        ResolvedConflictSyncService.UploadPlan plan = service.prepareUpload();
+        WebDavSyncResult result = service.resumeResolvedConflicts();
+
+        assertEquals(ResolvedConflictSyncService.UploadPlan.Status.READY, plan.getStatus(),
+                "resolved gzip plan status");
+        assertEquals("\"v2\"", plan.getRemoteVersionMarker(), "resolved gzip plan marker");
+        assertEquals(WebDavSyncResult.Status.PRECONDITION_FAILED, result.getStatus(),
+                "resolved gzip 412 status");
+        assertEquals(1, uploader.uploads.size(), "resolved gzip upload count");
+        assertEquals("\"v2\"", uploader.uploads.get(0).marker, "resolved gzip upload marker");
+        assertContains(result.getMessage(), "expected ETag: \"v2\"",
+                "resolved gzip expected marker diagnostic");
+        assertDoesNotContain("\"v2-gzip\"", result.getMessage(),
+                "resolved gzip diagnostics omit raw expected marker");
+    }
+
+    private static void verifyStoredChoicesUseStaleAwareFallbacks() {
+        verifyStoredChoicesStalePreconditionFallsBackToFreshConflicts();
+        verifyStoredChoicesStaleLocalChangedFallsBackToFreshConflicts();
+    }
+
+    private static void verifyStoredChoicesStalePreconditionFallsBackToFreshConflicts() {
+        SyncConflict stale = conflict(
+                "sync-stored-precondition",
+                item("sync-stored-precondition", "Apples", 1, false, 10L, "base"),
+                item("sync-stored-precondition", "Green apples", 1, false, 20L, "phone"),
+                item("sync-stored-precondition", "Red apples", 1, false, 30L, "tablet"),
+                "\"v2\"");
+        final SyncConflict fresh = conflict(
+                "sync-stored-precondition-fresh",
+                item("sync-stored-precondition-fresh", "Tea", 1, false, 10L, "base"),
+                item("sync-stored-precondition-fresh", "Green tea", 1, false, 40L, "phone"),
+                item("sync-stored-precondition-fresh", "Black tea", 1, false, 50L, "tablet"),
+                "\"v4\"");
+        RecordingLocalStore localStore = new RecordingLocalStore(document(stale.getLocalItem()));
+        final RecordingMetadataStore metadata = new RecordingMetadataStore(
+                document(stale.getBaselineItem()), "\"v1\"");
+        metadata.replaceConflicts(Collections.singletonList(stale));
+        final FixedConflictUploader uploader = new FixedConflictUploader(
+                WebDavPutResult.preconditionFailed(WebDavEtag.classify("\"v6\""), 412));
+        final ResolvedConflictSyncService service = new ResolvedConflictSyncService(localStore, metadata, uploader);
+
+        service.chooseAll(Collections.singletonList(
+                new ConflictListSelection.SelectedChoice("sync-stored-precondition", ConflictChoice.LOCAL)));
+        final int[] normalCalls = new int[] {0};
+        ResolvedConflictAwareSyncRunner runner = new ResolvedConflictAwareSyncRunner(
+                metadata,
+                new ResolvedConflictAwareSyncRunner.NormalSyncOperation() {
+                    @Override
+                    public WebDavSyncResult synchronize() {
+                        normalCalls[0]++;
+                        metadata.replaceConflicts(Collections.singletonList(fresh));
+                        return WebDavSyncResult.conflicts(metadata.loadConflicts());
+                    }
+                },
+                new ResolvedConflictAwareSyncRunner.ResolvedConflictResumeOperation() {
+                    @Override
+                    public WebDavSyncResult resumeResolvedConflicts() {
+                        return service.resumeResolvedConflicts();
+                    }
+                });
+
+        WebDavSyncResult result = runner.synchronizeOrResume();
+
+        assertEquals(1, uploader.uploads.size(),
+                "stored precondition attempts resolved upload before fallback");
+        assertEquals(1, normalCalls[0], "stored precondition runs normal sync fallback");
+        assertEquals(WebDavSyncResult.Status.CONFLICTS, result.getStatus(),
+                "stored precondition fallback returns conflicts");
+        assertContains(result.getMessage(), "expected ETag: \"v2\"",
+                "stored precondition preserves expected etag diagnostics");
+        assertContains(result.getMessage(), "response ETag: \"v6\"",
+                "stored precondition preserves response etag diagnostics");
+        assertContains(result.getMessage(), "synchronization stopped with fresh conflicts",
+                "stored precondition explains fresh conflicts after fallback");
+        assertDoesNotContain(SECRET, result.getMessage(),
+                "stored precondition fallback conflict message");
+        assertEquals("sync-stored-precondition-fresh", result.getConflicts().get(0).getSyncId(),
+                "stored precondition exposes fresh conflict");
+        assertEquals(SyncConflict.STATUS_UNRESOLVED, metadata.loadConflicts().get(0).getStatus(),
+                "stored precondition stores fresh unresolved conflict");
+    }
+
+    private static void verifyStoredChoicesStaleLocalChangedFallsBackToFreshConflicts() {
+        SyncConflict stale = conflict(
+                "sync-stored-local-changed",
+                item("sync-stored-local-changed", "Milk", 1, false, 10L, "base"),
+                item("sync-stored-local-changed", "Oat milk", 1, false, 20L, "phone"),
+                item("sync-stored-local-changed", "Soy milk", 1, false, 30L, "tablet"),
+                "\"v2\"");
+        final SyncConflict fresh = conflict(
+                "sync-stored-local-changed-fresh",
+                item("sync-stored-local-changed-fresh", "Coffee", 1, false, 10L, "base"),
+                item("sync-stored-local-changed-fresh", "Decaf", 1, false, 40L, "phone"),
+                item("sync-stored-local-changed-fresh", "Espresso", 1, false, 50L, "tablet"),
+                "\"v5\"");
+        RecordingLocalStore localStore = new RecordingLocalStore(document(stale.getLocalItem()));
+        final RecordingMetadataStore metadata = new RecordingMetadataStore(
+                document(stale.getBaselineItem()), "\"v1\"");
+        metadata.replaceConflicts(Collections.singletonList(stale));
+        final FixedConflictUploader uploader = new FixedConflictUploader(
+                WebDavPutResult.success(
+                        name.soulayrol.rhaa.sholi.sync.webdav.WebDavEtag.classify("\"v3\""),
+                        204));
+        final ResolvedConflictSyncService service = new ResolvedConflictSyncService(localStore, metadata, uploader);
+
+        service.chooseAll(Collections.singletonList(
+                new ConflictListSelection.SelectedChoice("sync-stored-local-changed", ConflictChoice.REMOTE)));
+        localStore.currentDocument = document(
+                item("sync-stored-local-changed", "Almond milk", 1, false, 60L, "phone"));
+        final int[] normalCalls = new int[] {0};
+        ResolvedConflictAwareSyncRunner runner = new ResolvedConflictAwareSyncRunner(
+                metadata,
+                new ResolvedConflictAwareSyncRunner.NormalSyncOperation() {
+                    @Override
+                    public WebDavSyncResult synchronize() {
+                        normalCalls[0]++;
+                        metadata.replaceConflicts(Collections.singletonList(fresh));
+                        return WebDavSyncResult.conflicts(metadata.loadConflicts());
+                    }
+                },
+                new ResolvedConflictAwareSyncRunner.ResolvedConflictResumeOperation() {
+                    @Override
+                    public WebDavSyncResult resumeResolvedConflicts() {
+                        return service.resumeResolvedConflicts();
+                    }
+                });
+
+        WebDavSyncResult result = runner.synchronizeOrResume();
+
+        assertEquals(0, uploader.uploads.size(),
+                "stored local changed skips stale resolved upload before fallback");
+        assertEquals(1, normalCalls[0], "stored local changed runs normal sync fallback");
+        assertEquals(WebDavSyncResult.Status.CONFLICTS, result.getStatus(),
+                "stored local changed fallback returns conflicts");
+        assertContains(result.getMessage(), "Local items changed during resolved conflict synchronization",
+                "stored local changed preserves stale diagnostic");
+        assertContains(result.getMessage(), "synchronization stopped with fresh conflicts",
+                "stored local changed explains fresh conflicts after fallback");
+        assertEquals("sync-stored-local-changed-fresh", result.getConflicts().get(0).getSyncId(),
+                "stored local changed exposes fresh conflict");
+        assertEquals(SyncConflict.STATUS_UNRESOLVED, metadata.loadConflicts().get(0).getStatus(),
+                "stored local changed stores fresh unresolved conflict");
+    }
+
     private static void verifyStaleResolvedPreconditionFallsBackToNormalSync() {
         SyncConflict staleResolved = conflict(
                 "sync-stale-precondition",
@@ -830,6 +1218,10 @@ public final class SyncOrchestrationStoryTest {
         assertEquals(1, normalCalls[0], "stale precondition normal sync fallback count");
         assertEquals(WebDavSyncResult.Status.CONFLICTS, result.getStatus(),
                 "stale precondition fallback returns normal sync result");
+        assertContains(result.getMessage(), "Remote sync document changed before resolved conflicts could upload",
+                "stale precondition fallback preserves stale message");
+        assertContains(result.getMessage(), "synchronization stopped with fresh conflicts",
+                "stale precondition fallback explains fresh conflicts");
         assertEquals("sync-fresh-precondition", result.getConflicts().get(0).getSyncId(),
                 "stale precondition exposes fresh conflict");
         assertEquals(SyncConflict.STATUS_UNRESOLVED, metadata.loadConflicts().get(0).getStatus(),
@@ -880,6 +1272,10 @@ public final class SyncOrchestrationStoryTest {
         assertEquals(1, normalCalls[0], "stale local changed normal sync fallback count");
         assertEquals(WebDavSyncResult.Status.CONFLICTS, result.getStatus(),
                 "stale local changed fallback returns normal sync result");
+        assertContains(result.getMessage(), "Local items changed during synchronization; please retry",
+                "stale local changed fallback preserves stale message");
+        assertContains(result.getMessage(), "synchronization stopped with fresh conflicts",
+                "stale local changed fallback explains fresh conflicts");
         assertEquals("sync-fresh-local-changed", result.getConflicts().get(0).getSyncId(),
                 "stale local changed exposes fresh conflict");
         assertEquals(SyncConflict.STATUS_UNRESOLVED, metadata.loadConflicts().get(0).getStatus(),
@@ -962,6 +1358,54 @@ public final class SyncOrchestrationStoryTest {
         assertEquals(0, resumeCalls[0], "unresolved orchestration skips resolved resume");
     }
 
+    private static void verifyResolvedUploadClearsConflictsBeforeSubsequentSync() {
+        SyncItem baselineTea = item("sync-clear-repeat", "Tea", 1, false, 10L, "base");
+        SyncItem localTea = item("sync-clear-repeat", "Green tea", 1, false, 20L, "phone");
+        SyncItem remoteTea = item("sync-clear-repeat", "Black tea", 1, false, 30L, "tablet");
+        SyncDocument baseline = document(baselineTea);
+        SyncDocument local = document(localTea);
+        SyncDocument remote = document(remoteTea);
+        RecordingTransport conflictTransport = new RecordingTransport();
+        conflictTransport.respond(200, "\"v2\"", null);
+        conflictTransport.respond(200, "\"v2\"", json(remote));
+        RecordingLocalStore localStore = new RecordingLocalStore(local);
+        RecordingMetadataStore metadata = new RecordingMetadataStore(baseline, "\"v1\"");
+
+        WebDavSyncResult conflictResult = controller(conflictTransport, localStore, metadata).synchronize(1425L);
+        RecordingConflictUploader uploader = new RecordingConflictUploader("\"v3\"");
+        ResolvedConflictSyncService service = new ResolvedConflictSyncService(localStore, metadata, uploader);
+
+        assertEquals(WebDavSyncResult.Status.CONFLICTS, conflictResult.getStatus(),
+                "clear-repeat conflict capture status");
+        assertEquals(1, metadata.loadConflicts().size(), "clear-repeat captured one conflict");
+
+        service.choose("sync-clear-repeat", ConflictChoice.LOCAL);
+        WebDavSyncResult resolvedResult = service.resumeResolvedConflicts();
+
+        assertEquals(WebDavSyncResult.Status.UPDATED_REMOTE, resolvedResult.getStatus(),
+                "clear-repeat resolved upload status");
+        assertEquals(1, uploader.uploads.size(), "clear-repeat uploads resolved document once");
+        assertEquals("\"v2\"", uploader.uploads.get(0).marker,
+                "clear-repeat resolved upload uses conflict marker");
+        assertDocumentEquals(document(localTea), metadata.loadBaselineDocument(),
+                "clear-repeat records resolved baseline");
+        assertEquals("\"v3\"", metadata.loadRemoteVersionMarker(),
+                "clear-repeat records resolved marker");
+        assertEquals(0, metadata.loadConflicts().size(),
+                "clear-repeat clears conflicts after successful upload");
+
+        RecordingTransport followUpTransport = new RecordingTransport();
+        followUpTransport.respond(200, "\"v3\"", null);
+        WebDavSyncResult followUpResult = controller(followUpTransport, localStore, metadata).synchronize(1430L);
+
+        assertEquals(WebDavSyncResult.Status.UP_TO_DATE, followUpResult.getStatus(),
+                "clear-repeat subsequent sync does not reopen conflict");
+        assertEquals(list("HEAD"), followUpTransport.methods(),
+                "clear-repeat subsequent sync only checks matching marker");
+        assertEquals(0, metadata.loadConflicts().size(),
+                "clear-repeat subsequent sync leaves conflict store empty");
+    }
+
     private static void verifyConfiguredDisplayNameSourcesLocalEditMetadata() throws Exception {
         String operations = readUtf8("sholi/src/main/java/name/soulayrol/rhaa/sholi/data/Operations.java");
         String editFragment = readUtf8("sholi/src/main/java/name/soulayrol/rhaa/sholi/EditFragment.java");
@@ -1000,20 +1444,213 @@ public final class SyncOrchestrationStoryTest {
     private static void verifySyncMenuAndConflictUiSources() throws Exception {
         String mainMenu = readUtf8("sholi/src/main/res/menu/main.xml");
         String mainActivity = readUtf8("sholi/src/main/java/name/soulayrol/rhaa/sholi/MainActivity.java");
+        String autoSyncController = readUtf8(
+                "sholi/src/main/java/name/soulayrol/rhaa/sholi/ForegroundWebDavAutoSyncController.java");
+        String abstractListFragment = readUtf8(
+                "sholi/src/main/java/name/soulayrol/rhaa/sholi/AbstractListFragment.java");
         String strings = readUtf8("sholi/src/main/res/values/strings.xml");
         String conflictDialog = readUtf8(
                 "sholi/src/main/java/name/soulayrol/rhaa/sholi/SyncConflictDialogFragment.java");
+        String syncResult = readUtf8(
+                "sholi/src/main/java/name/soulayrol/rhaa/sholi/sync/webdav/WebDavSyncResult.java");
+        String conflictLayout = readUtf8("sholi/src/main/res/layout/sync_conflict_dialog.xml");
+        String conflictRowLayout = readUtf8("sholi/src/main/res/layout/sync_conflict_row.xml");
+        String itemAdapter = readUtf8(
+                "sholi/src/main/java/name/soulayrol/rhaa/sholi/data/ItemLazyListAdapter.java");
+        String lazyListAdapter = readUtf8(
+                "sholi/src/main/java/name/soulayrol/rhaa/sholi/data/AbstractLazyListAdapter.java");
+        String itemStyler = readUtf8(
+                "sholi/src/main/java/name/soulayrol/rhaa/sholi/data/ItemViewStyler.java");
 
         assertContains(mainMenu, "action_sync", "main menu sync trigger id");
         assertContains(mainMenu, "action_main_sync", "main menu sync trigger title");
         assertContains(mainActivity, "AndroidWebDavSyncRunner", "main activity sync runner wiring");
         assertContains(mainActivity, "new Thread", "main activity async network work");
         assertContains(mainActivity, "runOnUiThread", "main activity UI status handoff");
+        assertContains(autoSyncController, "public final class ForegroundWebDavAutoSyncController",
+                "foreground automatic sync controller exists");
+        assertContains(autoSyncController, "FOREGROUND_SYNC_INTERVAL_SECONDS = 30L",
+                "foreground automatic sync uses named 30s interval constant");
+        assertContains(autoSyncController, "scheduleAtFixedRate",
+                "foreground automatic sync schedules periodic polling");
+        assertContains(autoSyncController, "delegate.startAutomaticSynchronization()",
+                "foreground automatic sync delegates ticks to shared synchronization path");
+        assertContains(autoSyncController, "scheduledFuture.cancel(false)",
+                "foreground automatic sync cancels future ticks without interrupting work");
+        assertContains(mainActivity, "new ForegroundWebDavAutoSyncController",
+                "main activity owns foreground automatic sync controller");
+        assertContains(mainActivity, "protected void onResume()", "main activity resume lifecycle hook");
+        assertContains(mainActivity, "startForegroundAutoSyncIfMainListVisible();",
+                "main activity starts foreground automatic sync on resume/open");
+        assertContains(mainActivity, "protected void onPause()", "main activity pause lifecycle hook");
+        assertContains(mainActivity, "stopForegroundAutoSync();",
+                "main activity stops foreground automatic sync on pause");
+        assertContains(mainActivity, "protected void onDestroy()", "main activity destroy lifecycle hook");
+        assertContains(mainActivity, "shutdownForegroundAutoSync();",
+                "main activity shuts down foreground automatic sync controller on destroy");
+        assertContains(mainActivity, "startSynchronization(SynchronizationTrigger.MANUAL)",
+                "manual sync routes through shared synchronization path");
+        assertContains(mainActivity, "startSynchronization(SynchronizationTrigger.AUTOMATIC)",
+                "automatic sync routes through shared synchronization path");
+        assertContains(mainActivity, "private boolean tryAcquireSynchronizationSlot()",
+                "manual and automatic sync share no-overlap guard");
+        assertContains(mainActivity, "synchronizationInProgress",
+                "shared synchronization path records in-flight work");
+        assertContains(mainActivity, "new AndroidWebDavSyncRunner(MainActivity.this).synchronizeOrResume()",
+                "shared synchronization path reuses Android WebDAV runner");
+        assertContains(mainActivity, "onAutomaticSynchronizationResult",
+                "main activity has automatic result policy");
+        assertContains(mainActivity, "isSilentAutomaticResult(result)",
+                "automatic up-to-date results are handled silently");
+        assertContains(mainActivity, "WebDavSyncResult.Status.UP_TO_DATE",
+                "automatic result policy recognizes up-to-date status");
+        assertContains(mainActivity, "if (!SyncConflictDialogFragment.isShowing(getFragmentManager()))",
+                "automatic conflicts avoid duplicate conflict dialogs");
+        assertContains(mainActivity, "AUTOMATIC_ERROR_NOTIFICATION_INTERVAL_MILLIS",
+                "automatic errors have rate-limit interval hook");
+        assertContains(mainActivity, "shouldShowAutomaticError(result",
+                "automatic repeated errors are suppressed or rate-limited");
+        assertContains(mainActivity, "lastAutomaticErrorStatus",
+                "automatic repeated error suppression tracks previous status");
         assertContains(mainActivity, "SyncConflictDialogFragment", "main activity conflict UI handoff");
-        assertContains(conflictDialog, "choose(", "conflict dialog saves resolution choice");
-        assertContains(conflictDialog, "Use local", "conflict dialog local choice text");
-        assertContains(conflictDialog, "Use remote", "conflict dialog remote choice text");
+        assertContains(mainActivity,
+                "SyncConflictDialogFragment.showNext(getFragmentManager(), conflictMessage(result))",
+                "main activity passes conflict diagnostics to dialog");
+        assertContains(conflictDialog, "public static boolean isShowing(FragmentManager fragmentManager)",
+                "conflict dialog exposes duplicate-dialog detection");
+        assertContains(abstractListFragment, "public void refreshList()",
+                "list fragments expose explicit refresh API");
+        assertContains(abstractListFragment, "if (!isAdded() || getActivity() == null",
+                "list refresh skips detached fragments");
+        assertContains(abstractListFragment, "_session == null || _adapter == null",
+                "list refresh skips destroyed fragments");
+        assertContains(abstractListFragment, "_session.clear();",
+                "list refresh clears cached DAO session entities");
+        assertContains(abstractListFragment, "_adapter.setLazyList(createList(getActivity()))",
+                "list refresh reloads lazy list from database");
+        assertContains(syncResult, "status == Status.PULLED_REMOTE",
+                "sync success includes pulled remote changes");
+        assertContains(mainActivity, "if (result.isSuccess())",
+                "main activity refreshes after every successful sync status");
+        assertContains(mainActivity, "refreshVisibleList();",
+                "main activity refreshes visible list after successful sync");
+        assertContains(mainActivity, "fragment.isAdded()",
+                "main activity skips detached visible list refresh targets");
+        assertContains(mainActivity, "fragment.getActivity() == this",
+                "main activity refreshes only fragments attached to itself");
+        assertContains(mainActivity, "Toast.makeText(this, R.string.sync_conflicts_found",
+                "main activity conflict toast stays generic");
+        assertDoesNotContain(mainActivity, "Toast.makeText(this, conflictMessage(result)",
+                "main activity does not rely on full diagnostic toast");
+        assertContains(conflictDialog, "chooseAll(", "conflict dialog saves resolution choices atomically");
+        assertContains(conflictDialog, "ARG_DIAGNOSTIC_MESSAGE",
+                "conflict dialog stores diagnostic argument key");
+        assertContains(conflictDialog,
+                "public static void showNext(FragmentManager fragmentManager, String diagnosticMessage)",
+                "conflict dialog overload accepts diagnostic message");
+        assertContains(conflictDialog, "setArguments(arguments)",
+                "conflict dialog passes diagnostic bundle");
+        assertContains(conflictDialog, "diagnosticMessage()",
+                "conflict dialog reads diagnostic argument");
+        assertContains(conflictDialog, "R.layout.sync_conflict_dialog", "conflict dialog custom view");
+        assertContains(conflictDialog, "setView(view)", "conflict dialog installs custom view");
+        assertContains(conflictDialog, "R.id.sync_conflict_diagnostic_message",
+                "conflict dialog binds diagnostic message view");
+        assertContains(conflictDialog, "R.string.sync_conflict_diagnostic_label",
+                "conflict dialog labels diagnostic message");
+        assertContains(conflictDialog, "setVisibility(View.GONE)",
+                "conflict dialog hides empty diagnostic panel");
+        assertContains(conflictDialog, "setPositiveButton(R.string.sync_conflict_use_selection",
+                "conflict dialog confirms selected choice");
+        assertContains(conflictDialog, "confirmButton.setOnClickListener",
+                "conflict dialog waits for positive confirmation");
+        assertContains(conflictDialog, "ConflictListSelection.fromConflicts(conflicts)",
+                "conflict dialog tracks all unresolved conflict selections");
+        assertContains(conflictDialog, "for (SyncConflict conflict: conflicts)",
+                "conflict dialog builds a row for every unresolved conflict");
+        assertContains(conflictDialog, "R.layout.sync_conflict_row",
+                "conflict dialog inflates reusable conflict rows");
+        assertContains(conflictDialog, "confirmButton.setEnabled(selection != null && selection.isComplete())",
+                "conflict dialog disables confirm until all rows are selected");
+        assertContains(conflictDialog, "runner.chooseAll(choices)",
+                "conflict dialog resolves confirmed choices in one batch");
+        assertContains(conflictDialog, "runner.synchronizeOrResume()",
+                "conflict dialog immediately resumes stale-aware sync");
+        assertContains(conflictDialog, "new Thread",
+                "conflict dialog runs immediate upload off the UI thread");
+        assertContains(conflictDialog, "runOnUiThread",
+                "conflict dialog returns immediate upload result to UI thread");
+        assertContains(conflictDialog, "WebDavSyncResult.Status.CONFLICTS",
+                "conflict dialog reopens conflicts returned by immediate upload");
+        assertContains(conflictDialog, "showNext(activity.getFragmentManager(), conflictMessage(activity, result))",
+                "conflict dialog reopens conflicts with diagnostic message");
+        assertContains(conflictDialog, "if (result.isSuccess())",
+                "conflict dialog refreshes after successful resolved-conflict sync");
+        assertContains(conflictDialog, "refreshVisibleList(activity);",
+                "conflict dialog refreshes visible list after successful resolved-conflict upload");
+        assertContains(conflictDialog, "fragment.isAdded()",
+                "conflict dialog skips detached visible list refresh targets");
+        assertContains(conflictDialog, "fragment.getActivity() == activity",
+                "conflict dialog refreshes only fragments attached to the callback activity");
+        assertContains(conflictDialog, "Toast.makeText(activity, R.string.sync_conflicts_found",
+                "conflict dialog conflict toast stays generic");
+        assertDoesNotContain(conflictDialog, "Toast.makeText(activity, conflictMessage(activity, result)",
+                "conflict dialog does not rely on full diagnostic toast");
+        assertContains(conflictDialog, "ConflictListSelection",
+                "conflict dialog delegates list selection behavior");
+        assertContains(conflictDialog, "GestureDetector", "conflict dialog swipe detector");
+        assertContains(conflictDialog, "onFling", "conflict dialog swipe handling");
+        assertContains(conflictDialog, "selection.selectFromSwipeDelta(syncId, dx)",
+                "swipe delta selects side through controller");
+        assertContains(conflictDialog, "action == MotionEvent.ACTION_UP && swipeHandled[0]",
+                "handled swipe consumes column click on release");
+        assertContains(conflictDialog, "bindConflictSide", "conflict dialog binds local and remote sides");
+        assertContains(conflictDialog, "ItemViewStyler.bindName",
+                "conflict dialog reuses shared item styling");
+        assertContains(itemAdapter, "ItemViewStyler.bindName",
+                "list adapter reuses shared item styling");
+        assertContains(lazyListAdapter, "if (_lazyList != null)",
+                "lazy list adapter closes previous lazy list only when present");
+        assertContains(lazyListAdapter, "_lazyList.close();",
+                "lazy list adapter retains previous lazy list close behavior");
+        assertContains(itemStyler, "Checkable.OFF_LIST", "shared styler off-list item styling");
+        assertContains(itemStyler, "Color.GRAY", "shared styler off-list item color");
+        assertContains(itemStyler, "Checkable.UNCHECKED", "shared styler unchecked item styling");
+        assertContains(itemStyler, "Color.GREEN", "shared styler unchecked item color");
+        assertContains(itemStyler, "Checkable.CHECKED", "shared styler checked item styling");
+        assertContains(itemStyler, "Paint.STRIKE_THRU_TEXT_FLAG",
+                "shared styler checked item strike-through");
+        assertContains(itemStyler, "Color.WHITE", "shared styler checked item color");
+        assertContains(conflictLayout, "ScrollView", "conflict layout scrolls all conflict rows");
+        assertContains(conflictLayout, "@+id/sync_conflict_diagnostic_message",
+                "conflict layout includes diagnostic panel");
+        assertContains(conflictLayout, "@string/sync_conflict_diagnostic_label",
+                "conflict layout labels diagnostic panel");
+        assertContains(conflictLayout, "android:singleLine=\"false\"",
+                "conflict layout allows multiline diagnostics");
+        assertContains(conflictLayout, "android:scrollHorizontally=\"false\"",
+                "conflict layout wraps long ETag diagnostics");
+        assertDoesNotContain(conflictLayout, "ellipsize",
+                "conflict layout does not truncate diagnostics");
+        assertContains(conflictLayout, "@+id/sync_conflict_list",
+                "conflict layout hosts all conflict rows");
+        assertContains(conflictRowLayout, "@+id/sync_conflict_local_column",
+                "conflict row layout local column id");
+        assertContains(conflictRowLayout, "@+id/sync_conflict_remote_column",
+                "conflict row layout remote column id");
+        assertContains(conflictRowLayout, "@+id/sync_conflict_local_new",
+                "conflict row layout local new indicator");
+        assertContains(conflictRowLayout, "@+id/sync_conflict_remote_new",
+                "conflict row layout remote new indicator");
+        assertContains(conflictRowLayout, "@layout/list_item", "conflict row layout reuses app item row");
+        assertContains(conflictRowLayout, "sync_conflict_side_background",
+                "conflict row layout has selected-column highlight drawable");
         assertContains(strings, "Sync", "sync status strings");
+        assertContains(strings, "Local", "conflict local label string");
+        assertContains(strings, "Remote", "conflict remote label string");
+        assertContains(strings, "🆕 new", "conflict new indicator string");
+        assertContains(strings, "Use selection", "conflict confirm string");
+        assertContains(strings, "sync_conflict_diagnostic_label", "conflict diagnostic label string");
         assertContains(strings, "Changed fields", "conflict changed fields string");
         assertContains(strings, "modified_at", "conflict timestamp string");
         assertContains(strings, "Status", "conflict status string");
@@ -1151,6 +1788,15 @@ public final class SyncOrchestrationStoryTest {
         throw new AssertionError("Expected " + label + " to reject missing snapshot choice");
     }
 
+    private static void assertSelectedChoice(
+            ConflictListSelection.SelectedChoice actual,
+            String syncId,
+            ConflictChoice choice,
+            String label) {
+        assertEquals(syncId, actual.getSyncId(), label + " sync_id");
+        assertEquals(choice, actual.getChoice(), label + " choice");
+    }
+
     private static void assertEquals(Object expected, Object actual, String label) {
         if (expected == null ? actual != null : !expected.equals(actual)) {
             throw new AssertionError("Unexpected " + label + ": expected=" + expected + " actual=" + actual);
@@ -1173,6 +1819,15 @@ public final class SyncOrchestrationStoryTest {
         ArrayList<T> list = new ArrayList<T>();
         list.add(first);
         list.add(second);
+        return list;
+    }
+
+    private static <T> List<T> list(T first, T second, T third, T fourth) {
+        ArrayList<T> list = new ArrayList<T>();
+        list.add(first);
+        list.add(second);
+        list.add(third);
+        list.add(fourth);
         return list;
     }
 
@@ -1476,6 +2131,22 @@ public final class SyncOrchestrationStoryTest {
                     204);
         }
 
+    }
+
+    private static final class FixedConflictUploader
+            implements ResolvedConflictSyncService.ConflictUploader {
+        private final WebDavPutResult result;
+        private final List<Upload> uploads = new ArrayList<Upload>();
+
+        FixedConflictUploader(WebDavPutResult result) {
+            this.result = result;
+        }
+
+        @Override
+        public WebDavPutResult uploadResolvedDocument(SyncDocument document, String remoteVersionMarker) {
+            uploads.add(new Upload(document, remoteVersionMarker));
+            return result;
+        }
     }
 
     private static final class Upload {

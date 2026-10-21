@@ -41,7 +41,13 @@ public final class ResolvedConflictAwareSyncRunner {
 
         WebDavSyncResult result = resolvedConflictResumeOperation.resumeResolvedConflicts();
         if (isStaleResolvedConflictResult(result)) {
-            return normalSyncOperation.synchronize();
+            WebDavSyncResult fallbackResult = normalSyncOperation.synchronize();
+            if (fallbackResult.getStatus() == WebDavSyncResult.Status.CONFLICTS) {
+                return WebDavSyncResult.conflicts(
+                        fallbackResult.getConflicts(),
+                        staleFallbackConflictMessage(result.getMessage()));
+            }
+            return fallbackResult;
         }
         return result;
     }
@@ -58,6 +64,13 @@ public final class ResolvedConflictAwareSyncRunner {
     private static boolean isStaleResolvedConflictResult(WebDavSyncResult result) {
         return result.getStatus() == WebDavSyncResult.Status.PRECONDITION_FAILED
                 || result.getStatus() == WebDavSyncResult.Status.LOCAL_CHANGED;
+    }
+
+    private static String staleFallbackConflictMessage(String staleMessage) {
+        if (staleMessage == null || staleMessage.trim().length() == 0) {
+            return "synchronization stopped with fresh conflicts";
+        }
+        return staleMessage + "; synchronization stopped with fresh conflicts";
     }
 
     public interface NormalSyncOperation {

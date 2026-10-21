@@ -65,13 +65,22 @@ public abstract class AbstractListFragment extends ListFragment {
         SharedPreferences sharedPref = PreferenceManager.getDefaultSharedPreferences(getActivity());
         _adapter.setTextSize(Integer.valueOf(sharedPref.getString(
                 SettingsActivity.KEY_LIST_ITEM_SIZE, _defaultItemSize)));
+        refreshList();
+    }
+
+    public void refreshList() {
+        if (!isAdded() || getActivity() == null || _session == null || _adapter == null) {
+            return;
+        }
         _session.clear();
         _adapter.setLazyList(createList(getActivity()));
     }
 
     @Override
     public void onDestroy() {
-        getAdapter().setLazyList(null);
+        if (getAdapter() != null) {
+            getAdapter().setLazyList(null);
+        }
         super.onDestroy();
     }
 

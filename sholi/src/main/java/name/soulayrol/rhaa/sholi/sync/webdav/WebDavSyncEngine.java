@@ -98,7 +98,12 @@ public final class WebDavSyncEngine {
                     "Created remote sync document");
         }
         if (put.getStatus() == WebDavPutResult.Status.PRECONDITION_FAILED) {
-            return recoverFromPreconditionFailure(localDocument, baselineDocument, conflictTimestamp);
+            return recoverFromPreconditionFailure(
+                    localDocument,
+                    baselineDocument,
+                    conflictTimestamp,
+                    null,
+                    put);
         }
         return fromPutError(put);
     }
@@ -318,7 +323,9 @@ public final class WebDavSyncEngine {
     private WebDavSyncResult recoverFromPreconditionFailure(
             SyncDocument localDocument,
             SyncDocument baselineDocument,
-            long conflictTimestamp) {
+            long conflictTimestamp,
+            String expectedMarker,
+            WebDavPutResult failedPut) {
         RemoteSnapshot snapshot = downloadRemote(null);
         if (snapshot.result != null) {
             return snapshot.result;
@@ -326,18 +333,29 @@ public final class WebDavSyncEngine {
         if (snapshot.missing) {
             return WebDavSyncResult.status(
                     WebDavSyncResult.Status.PRECONDITION_FAILED,
-                    "Remote sync document changed during upload");
+                    expectedMarker == null
+                            ? "Remote sync document changed during upload"
+                            : preconditionFailureMessage(
+                                    "Remote sync document changed during upload",
+                                    expectedMarker,
+                                    failedPut));
         }
         if (snapshot.safeUploadMarker == null) {
             return confirmationRequired();
         }
-        return analyzeWithSafeUploadMarker(
+        WebDavSyncResult result = analyzeWithSafeUploadMarker(
                 localDocument,
                 baselineDocument,
                 snapshot,
                 snapshot.safeUploadMarker,
                 conflictTimestamp,
                 false);
+        if (result.getStatus() == WebDavSyncResult.Status.CONFLICTS && expectedMarker != null) {
+            return WebDavSyncResult.conflicts(
+                    result.getConflicts(),
+                    preconditionFailureWithFreshConflictsMessage(expectedMarker, failedPut));
+        }
+        return result;
     }
 
     private WebDavSyncResult uploadWithIfMatch(
@@ -368,11 +386,19 @@ public final class WebDavSyncEngine {
         }
         if (put.getStatus() == WebDavPutResult.Status.PRECONDITION_FAILED) {
             if (retryOnPrecondition) {
-                return recoverFromPreconditionFailure(localDocument, baselineDocument, conflictTimestamp);
+                return recoverFromPreconditionFailure(
+                        localDocument,
+                        baselineDocument,
+                        conflictTimestamp,
+                        safeUploadMarker,
+                        put);
             }
             return WebDavSyncResult.status(
                     WebDavSyncResult.Status.PRECONDITION_FAILED,
-                    "Remote sync document changed during upload retry");
+                    preconditionFailureMessage(
+                            "Remote sync document changed during upload retry",
+                            safeUploadMarker,
+                            put));
         }
         return fromPutError(put);
     }
@@ -537,6 +563,27 @@ public final class WebDavSyncEngine {
             return null;
         }
         return etag.getValue();
+    }
+
+    private static String preconditionFailureMessage(
+            String message,
+            String expectedMarker,
+            WebDavPutResult put) {
+        return message + " ("
+                + WebDavEtag.describeForMessage("expected ETag", expectedMarker)
+                + "; "
+                + WebDavEtag.describeForMessage("response ETag", markerFrom(put.getEtag()))
+                + ")";
+    }
+
+    private static String preconditionFailureWithFreshConflictsMessage(
+            String expectedMarker,
+            WebDavPutResult put) {
+        return preconditionFailureMessage(
+                "Remote sync document changed during upload",
+                expectedMarker,
+                put)
+                + "; synchronization stopped with fresh conflicts";
     }
 
     private static WebDavSyncResult confirmationRequired() {

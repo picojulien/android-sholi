@@ -17,6 +17,7 @@ import name.soulayrol.rhaa.sholi.sync.document.SyncDocumentJson;
 import name.soulayrol.rhaa.sholi.sync.merge.ConflictChoice;
 import name.soulayrol.rhaa.sholi.sync.merge.SyncConflict;
 import name.soulayrol.rhaa.sholi.sync.merge.SyncMetadataStore;
+import name.soulayrol.rhaa.sholi.sync.orchestration.ConflictListSelection;
 import name.soulayrol.rhaa.sholi.sync.orchestration.ResolvedConflictAwareSyncRunner;
 import name.soulayrol.rhaa.sholi.sync.orchestration.ResolvedConflictSyncService;
 import name.soulayrol.rhaa.sholi.sync.orchestration.WebDavSyncController;
@@ -78,6 +79,15 @@ public final class AndroidWebDavSyncRunner {
                 stores.metadataStore,
                 new NoopConflictUploader())
                 .choose(syncId, choice);
+    }
+
+    public List<SyncConflict> chooseAll(List<ConflictListSelection.SelectedChoice> choices) {
+        SyncStores stores = openStores();
+        return new ResolvedConflictSyncService(
+                stores.localStore,
+                stores.metadataStore,
+                new NoopConflictUploader())
+                .chooseAll(choices);
     }
 
     public WebDavSyncResult resumeResolvedConflicts() {

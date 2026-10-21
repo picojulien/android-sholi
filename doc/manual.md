@@ -76,7 +76,7 @@ These markers can be redefined at will in settings. They can be anything and are
 
 ### WebDAV synchronization
 
-**sholi-dav** can synchronize the list through a WebDAV server. Synchronization is manual and offline-first: the database on the device remains the source of truth until you choose the *Sync* entry from the main menu. A sync run may create or update the remote document, pull remote changes, report that everything is already up to date, fail with a configuration/network/server error, or stop with conflicts that need your choice.
+**sholi-dav** can synchronize the list through a WebDAV server. Synchronization is foreground-automatic and offline-first: when the main list UI is open or resumed, **sholi-dav** starts an immediate sync and then polls periodically while it remains in the foreground. No background sync is kept running after the app is paused or closed, and the manual *Sync* entry from the main menu remains available for an explicit run. A sync run may create or update the remote document, pull remote changes, report that everything is already up to date, fail with a configuration/network/server error, or stop with conflicts that need your choice.
 
 #### Settings and connection test
 
@@ -92,9 +92,9 @@ The *Test connection* action checks the configured endpoint without modifying li
 
 #### Sync results and conflicts
 
-Use the *Sync* action in the main menu to start manual synchronization. Successful results report that the remote sync document was created or updated, that remote changes were pulled, or that no sync changes were detected. Failure results report the high-level reason, such as incomplete configuration, authentication failure, network/server error, invalid remote document, local changes during synchronization, or a required confirmation before replacing remote data.
+Use the *Sync* action in the main menu to start manual synchronization when you want explicit feedback. Foreground automatic synchronization stays quiet when no changes are detected, refreshes the visible list after successful changes, shows the same conflict dialog when conflicts are found, and rate-limits repeated error messages. Successful manual results report that the remote sync document was created or updated, that remote changes were pulled, or that no sync changes were detected. Failure results report the high-level reason, such as incomplete configuration, authentication failure, network/server error, invalid remote document, local changes during synchronization, or a required confirmation before replacing remote data.
 
-When local and remote changes touch different items or fields, **sholi-dav** merges them automatically. When the same item changed differently on both sides, synchronization stops and shows a conflict dialog. The dialog shows the local and remote values, changed fields, timestamps, status, deletion state, and modifier name for the item. Choose *Use local* or *Use remote* for the whole item. If more conflicts remain, **sholi-dav** shows the next one. After all conflicts are resolved, tap *Sync* again to upload the resolved document.
+When local and remote changes touch different items or fields, **sholi-dav** merges them automatically. When the same item changed differently on both sides, synchronization stops and shows a conflict dialog. The dialog shows the local and remote values, changed fields, timestamps, status, deletion state, and modifier name for the item. Choose the local or remote version for each conflict, then confirm the selection; **sholi-dav** uploads the resolved document through the same safe synchronization path.
 
 #### Remote safety
 
